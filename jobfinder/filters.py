@@ -69,7 +69,7 @@ def evaluate(job: dict, cfg: dict) -> tuple[bool, str]:
     """Return (keep, reason)."""
     if cfg.get("exclude_senior_titles", True) and not title_ok(job["title"], cfg["title_exclude"], cfg.get("title_include")):
         return False, "title"
-    if job["company"].lower() in {c.lower() for c in cfg.get("company_blacklist", [])}:
+    if any(c.lower() in job["company"].lower() for c in cfg.get("company_blacklist") or []):
         return False, "blacklist"
     if (job.get("seniority") or "").lower() in {"director", "executive"}:
         return False, "seniority"

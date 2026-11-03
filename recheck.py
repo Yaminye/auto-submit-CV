@@ -14,6 +14,13 @@ def main():
     rows = [dict(r) for r in db.unsent(con)]
     dropped = 0
     for job in rows:
+        # cheap title check first, no network
+        if not filters.title_ok(job["title"], cfg["title_exclude"], cfg.get("title_include")):
+            con.execute("UPDATE jobs SET keep=0, reason='title' WHERE job_id=?", (job["job_id"],))
+            con.commit()
+            dropped += 1
+            print(f"  - {job['title']} @ {job['company']}: title")
+            continue
         job.update(linkedin.details(job["job_id"]))
         keep, reason = filters.evaluate(job, cfg)
         con.execute("UPDATE jobs SET keep=?, reason=?, years=? WHERE job_id=?",

@@ -24,6 +24,12 @@ queries:
   Data Science:
     - Data Scientist
     - Junior Data Scientist
+  DevOps:
+    - DevOps Engineer
+    - Junior DevOps
+    - Cloud Engineer
+    - Platform Engineer
+    - SRE
 
 title_exclude:
   - senior
@@ -39,14 +45,37 @@ title_exclude:
   - "vp "
   - ראש צוות
   - בכיר
-  - devops
   - qa
   - frontend
   - front-end
   - android
   - ios
+  - test
+  - automation
+  - noc
+  - support
+  - validation
+  - verification
+  - security analyst
+  - " soc "
+  - penetration
+  - solution
+  - " sales "
+  - hardware
+  - embedded
+  - firmware
+  - fpga
+  - asic
+  - robotics
+  - simulation
+  - mechanical
+  - electrical
+  - student
+  - " intern "
+  - internship
 
-company_blacklist: []
+company_blacklist:
+  - Mobileye
 
 # title must contain at least one of these (search returns noise)
 title_include:
@@ -59,16 +88,32 @@ title_include:
   - full-stack
   - python
   - node
-  - software
-  - developer
-  - engineer
+  - software engineer
+  - software developer
+  - sw engineer
+  - java
+  - ".net"
+  - golang
+  - " go "
   - "ai "
   - "ai/"
   - llm
+  - ai-
+  - "(ai)"
+  - artificial intelligence
+  - deep learning
+  - ml engineer
   - genai
   - machine learning
   - "ml "
   - data scien
+  - devops
+  - dev ops
+  - cloud
+  - platform
+  - " sre"
+  - site reliability
+  - infrastructure
   - מפתח
   - מפתחת
   - תוכניתן
