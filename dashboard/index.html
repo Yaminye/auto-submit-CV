@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job Tracker</title>
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #667085; --line: #e4e7ec;
+  --hover: #f1f4f8; --accent: #2563eb; --accent-soft: #e8efff;
+  --green: #15803d; --green-soft: #e7f6ec; --amber: #b45309; --amber-soft: #fdf3e2;
+  --red: #b91c1c; --red-soft: #fdecec; --purple: #6d28d9; --purple-soft: #f1ebfe;
+  --gray: #475467; --gray-soft: #eef0f3; --shadow: 0 10px 30px rgba(16,24,40,.12);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1216; --panel: #171b21; --text: #e6e9ee; --muted: #8b95a5; --line: #262c35;
+    --hover: #1e242c; --accent: #6ea0ff; --accent-soft: #1b2a45;
+    --green: #4ade80; --green-soft: #13301f; --amber: #fbbf24; --amber-soft: #33270f;
+    --red: #f87171; --red-soft: #3a1717; --purple: #b794f6; --purple-soft: #2a1f45;
+    --gray: #a6b0bf; --gray-soft: #232a33; --shadow: 0 10px 30px rgba(0,0,0,.5);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Hebrew", sans-serif; }
+header { padding: 20px 24px 8px; }
+h1 { font-size: 20px; margin: 0 0 14px; font-weight: 650; }
+.stats { display: flex; flex-wrap: wrap; gap: 8px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 96px; }
+.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
+.stat span { color: var(--muted); font-size: 12px; }
+.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 14px 24px; position: sticky; top: 0;
+  background: var(--bg); z-index: 2; border-bottom: 1px solid var(--line); }
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-right: auto; }
+.tab { border: 1px solid transparent; background: none; color: var(--muted); padding: 6px 12px; border-radius: 8px;
+  cursor: pointer; font: inherit; }
+.tab:hover { background: var(--hover); color: var(--text); }
+.tab.on { background: var(--panel); border-color: var(--line); color: var(--text); font-weight: 600; }
+.tab .n { color: var(--muted); font-weight: 400; margin-left: 4px; font-variant-numeric: tabular-nums; }
+input[type=search], select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 8px; padding: 6px 10px; }
+input[type=search] { width: 220px; max-width: 100%; }
+main { padding: 0 24px 40px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line);
+  border-radius: 12px; overflow: hidden; margin-top: 14px; }
+th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 12px;
+  border-bottom: 1px solid var(--line); white-space: nowrap; }
+td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: var(--hover); }
+tbody tr.sel { background: var(--accent-soft); }
+.t { font-weight: 600; }
+.c { color: var(--muted); font-size: 13px; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.score { display: inline-block; min-width: 34px; text-align: center; padding: 2px 6px; border-radius: 6px;
+  font-weight: 700; font-variant-numeric: tabular-nums; }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.s-queued, .sc-hi { background: var(--accent-soft); color: var(--accent); }
+.s-review, .sc-mid { background: var(--amber-soft); color: var(--amber); }
+.s-applied { background: var(--green-soft); color: var(--green); }
+.s-failed { background: var(--red-soft); color: var(--red); }
+.s-external { background: var(--purple-soft); color: var(--purple); }
+.s-low, .s-skipped, .s-new, .s-dropped, .sc-lo, .sc-none { background: var(--gray-soft); color: var(--gray); }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+.why { color: var(--muted); font-size: 12px; margin-top: 2px; }
+/* drawer */
+.drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%); background: var(--panel);
+  border-left: 1px solid var(--line); box-shadow: var(--shadow); transform: translateX(100%); transition: transform .2s;
+  z-index: 5; display: flex; flex-direction: column; }
+.drawer.open { transform: none; }
+.dh { padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
+.dh h2 { margin: 0 32px 4px 0; font-size: 18px; }
+.x { position: absolute; top: 14px; right: 14px; border: 0; background: none; font-size: 22px; color: var(--muted); cursor: pointer; }
+.db { padding: 16px 20px 40px; overflow-y: auto; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 6px 12px;
+  border-radius: 8px; cursor: pointer; text-decoration: none; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px 16px; margin: 4px 0 18px; }
+.meta div > span:first-child { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 0 8px; }
+.reason { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.desc { white-space: pre-wrap; line-height: 1.55; }
+.ans td { padding: 6px 8px; font-size: 13px; }
+.ans { margin-top: 0; }
+.src { color: var(--muted); font-size: 12px; }
+@media (max-width: 760px) {
+  header, .bar, main { padding-left: 16px; padding-right: 16px; }
+  .hide-sm { display: none; }
+  input[type=search] { width: 100%; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Job Tracker</h1>
+  <div class="stats" id="stats"></div>
+</header>
+<div class="bar">
+  <div class="tabs" id="tabs"></div>
+  <input type="search" id="q" placeholder="Search title / company…">
+  <select id="cat"><option value="">All categories</option></select>
+  <select id="sort">
+    <option value="score">Sort: score</option>
+    <option value="new">Sort: newest</option>
+  </select>
+</div>
+<main id="main"></main>
+
+<aside class="drawer" id="drawer" aria-hidden="true">
+  <button class="x" id="close" aria-label="Close">×</button>
+  <div class="dh" id="dh"></div>
+  <div class="db" id="db"></div>
+</aside>
+
+<script>
+const TABS = [
+  ["queued", "Apply queue", j => j.keep && j.status === "queued"],
+  ["review", "Review 50–69", j => j.keep && j.status === "review"],
+  ["applied", "Applied", j => j.keep && j.status === "applied"],
+  ["low", "Low", j => j.keep && j.status === "low"],
+  ["other", "Skipped / external / failed", j => j.keep && ["skipped", "external", "failed"].includes(j.status)],
+  ["unscored", "Not scored", j => j.keep && j.score == null],
+  ["dropped", "Dropped by filters", j => !j.keep],
+  ["all", "All kept", j => j.keep],
+];
+let jobs = [], tab = location.hash.slice(1) || "queued", selected = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const day = s => s ? s.slice(0, 10) : "–";
+const scoreClass = s => s == null ? "sc-none" : s >= 70 ? "sc-hi" : s >= 50 ? "sc-mid" : "sc-lo";
+const statusOf = j => j.keep ? (j.status || "new") : "dropped";
+
+async function load() {
+  jobs = await (await fetch("/api/jobs")).json();
+  const cats = [...new Set(jobs.filter(j => j.keep).map(j => j.category))].sort();
+  const cur = $("cat").value;
+  $("cat").innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option>${esc(c)}</option>`).join("");
+  $("cat").value = cur;
+  render();
+}
+
+function render() {
+  const kept = jobs.filter(j => j.keep);
+  const today = new Date().toISOString().slice(0, 10);
+  const stats = [
+    ["In queue", kept.filter(j => j.status === "queued").length],
+    ["Review", kept.filter(j => j.status === "review").length],
+    ["Applied", kept.filter(j => j.status === "applied").length],
+    ["Applied today", kept.filter(j => (j.applied_at || "").startsWith(today)).length],
+    ["Kept total", kept.length],
+    ["Dropped", jobs.length - kept.length],
+    ["Not emailed yet", kept.filter(j => !j.sent_at).length],
+  ];
+  $("stats").innerHTML = stats.map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
+  $("tabs").innerHTML = TABS.map(([k, l, f]) =>
+    `<button class="tab ${k === tab ? "on" : ""}" data-k="${k}">${l}<span class="n">${jobs.filter(f).length}</span></button>`).join("");
+
+  const q = $("q").value.trim().toLowerCase(), cat = $("cat").value;
+  const filt = TABS.find(t => t[0] === tab)[2];
+  let rows = jobs.filter(filt)
+    .filter(j => !cat || j.category === cat)
+    .filter(j => !q || (j.title + " " + j.company).toLowerCase().includes(q));
+  rows.sort($("sort").value === "score"
+    ? (a, b) => (b.score ?? -1) - (a.score ?? -1) || (b.found_at > a.found_at ? 1 : -1)
+    : (a, b) => (b.found_at > a.found_at ? 1 : -1));
+
+  if (!rows.length) { $("main").innerHTML = '<div class="empty">No jobs here.</div>'; return; }
+  const dropped = tab === "dropped";
+  $("main").innerHTML = `<table><thead><tr>
+      <th>${dropped ? "" : "Score"}</th><th>Job</th><th class="hide-sm">Category</th>
+      <th class="hide-sm">Yrs</th><th class="hide-sm">Posted</th><th>${dropped ? "Dropped because" : "Status"}</th>
+    </tr></thead><tbody>${rows.map(j => `
+    <tr data-id="${j.job_id}" class="${j.job_id === selected ? "sel" : ""}">
+      <td>${dropped ? "" : `<span class="score ${scoreClass(j.score)}">${j.score ?? "–"}</span>`}</td>
+      <td><div class="t" dir="auto">${esc(j.title)}</div><div class="c" dir="auto">${esc(j.company)}</div>
+        ${j.match_reason && !dropped ? `<div class="why">${esc(j.match_reason)}</div>` : ""}</td>
+      <td class="hide-sm">${esc(j.category)}</td>
+      <td class="hide-sm num">${j.years ?? "–"}</td>
+      <td class="hide-sm num">${day(j.posted)}</td>
+      <td>${dropped ? `<span class="c">${esc(j.reason)}</span>` : `<span class="pill s-${statusOf(j)}">${statusOf(j)}</span>`}</td>
+    </tr>`).join("")}</tbody></table>`;
+}
+
+async function openJob(id) {
+  selected = id; render();
+  const j = await (await fetch(`/api/jobs/${id}`)).json();
+  const st = statusOf(j);
+  $("dh").innerHTML = `
+    <h2 dir="auto">${esc(j.title)}</h2>
+    <div class="c" dir="auto">${esc(j.company)} · ${esc(j.location)}</div>
+    <div class="actions">
+      <a class="btn primary" href="${esc(j.url)}" target="_blank" rel="noopener">Open on LinkedIn ↗</a>
+      ${j.keep ? ["queued", "review", "skipped"].filter(s => s !== st).map(s =>
+        `<button class="btn" data-set="${s}">${{queued: "Move to queue", review: "Move to review", skipped: "Skip"}[s]}</button>`).join("") : ""}
+    </div>`;
+  const ans = j.apply_answers;
+  $("db").innerHTML = `
+    <div class="meta">
+      <div><span>Status</span><span class="pill s-${st}">${st}</span></div>
+      <div><span>Score</span><span class="score ${scoreClass(j.score)}">${j.score ?? "–"}</span></div>
+      <div><span>Category</span>${esc(j.category)}</div>
+      <div><span>Years asked</span>${j.years ?? "not stated"}</div>
+      <div><span>Posted</span>${day(j.posted)}</div>
+      <div><span>Found</span>${day(j.found_at)}</div>
+      <div><span>Emailed</span>${j.sent_at ? day(j.sent_at) : "not yet"}</div>
+      <div><span>Applied</span>${j.applied_at ? day(j.applied_at) : "–"}</div>
+    </div>
+    ${j.match_reason ? `<h3>Why this score</h3><div class="reason">${esc(j.match_reason)}</div>` : ""}
+    ${!j.keep ? `<h3>Dropped because</h3><div class="reason">${esc(j.reason)}</div>` : ""}
+    ${ans ? `<h3>Answers ${ans.dry_run ? "(dry run – not sent)" : "sent"} · ${esc(day(ans.at))}</h3>
+      <table class="ans"><tbody>${ans.answers.map(a => `<tr><td dir="auto">${esc(a.label)}</td>
+        <td dir="auto"><b>${esc(a.value) || "–"}</b></td><td class="src">${esc(a.source)}</td></tr>`).join("")}</tbody></table>` : ""}
+    <h3>Description</h3>
+    <div class="desc" dir="auto">${j.description ? esc(j.description) : '<span class="c">No description saved (dropped before it was fetched).</span>'}</div>`;
+  $("drawer").classList.add("open");
+  $("drawer").setAttribute("aria-hidden", "false");
+}
+
+function closeDrawer() {
+  $("drawer").classList.remove("open"); $("drawer").setAttribute("aria-hidden", "true");
+  selected = null; render();
+}
+
+$("tabs").addEventListener("click", e => {
+  const b = e.target.closest(".tab"); if (!b) return;
+  tab = b.dataset.k; location.hash = tab; render();
+});
+$("main").addEventListener("click", e => { const r = e.target.closest("tr[data-id]"); if (r) openJob(r.dataset.id); });
+$("dh").addEventListener("click", async e => {
+  const b = e.target.closest("[data-set]"); if (!b) return;
+  await fetch(`/api/jobs/${selected}/status`, {method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({status: b.dataset.set})});
+  const id = selected; await load(); openJob(id);
+});
+["q", "cat", "sort"].forEach(id => $(id).addEventListener("input", render));
+$("close").addEventListener("click", closeDrawer);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+load();
+</script>
+</body>
+</html>

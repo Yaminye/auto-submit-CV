@@ -31,6 +31,7 @@ EXTRA_COLUMNS = {
     "match_reason": "TEXT",
     "applied_at": "TEXT",
     "apply_note": "TEXT",
+    "apply_answers": "TEXT",   # JSON: [{label, value, source}] + dry_run flag
 }
 # status: new -> queued (score>=apply) / review (>=review) / low  -> applied / skipped / external / failed
 
@@ -110,4 +111,12 @@ def set_status(con, job_id: str, status: str, note: str = "") -> None:
     applied_at = datetime.now().isoformat(timespec="seconds") if status == "applied" else None
     con.execute("UPDATE jobs SET status=?, apply_note=?, applied_at=COALESCE(?, applied_at) WHERE job_id=?",
                 (status, note, applied_at, job_id))
+    con.commit()
+
+
+def save_answers(con, job_id: str, log: list, dry_run: bool = False) -> None:
+    import json
+    payload = json.dumps({"dry_run": dry_run, "at": datetime.now().isoformat(timespec="seconds"),
+                          "answers": log}, ensure_ascii=False)
+    con.execute("UPDATE jobs SET apply_answers=? WHERE job_id=?", (payload, job_id))
     con.commit()

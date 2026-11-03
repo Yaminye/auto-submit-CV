@@ -1,4 +1,4 @@
-"""Claude calls: score a job vs the CV, and answer Easy Apply form fields."""
+"""Claude call: score a job vs the CV (0-100). Form answers are NOT done by Claude - see known_answers.py."""
 import json
 import logging
 import os
@@ -6,7 +6,6 @@ from functools import lru_cache
 from pathlib import Path
 
 import anthropic
-import yaml
 from pypdf import PdfReader
 
 log = logging.getLogger("claude")
@@ -27,13 +26,6 @@ def cv_text() -> str:
         raise SystemExit("CV_PATH missing or not found - set it in .env")
     return "\n".join(p.extract_text() or "" for p in PdfReader(path).pages)
 
-
-@lru_cache
-def profile() -> dict:
-    p = ROOT / "profile.yaml"
-    if not p.exists():
-        raise SystemExit("profile.yaml missing - copy profile.example.yaml and fill it")
-    return yaml.safe_load(p.read_text())
 
 
 def _call(system: str, user: str, schema: dict, max_tokens: int = 4000) -> dict | None:
@@ -112,69 +104,3 @@ def score_job(job: dict) -> tuple[int, str] | None:
     if not out:
         return None
     return max(0, min(100, int(out["score"]))), out["reason"]
-
-
-# ---------------------------------------------------------------- form answers
-
-ANSWER_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "answers": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "id": {"type": "string"},
-                    "value": {"type": "string"},
-                    "confident": {"type": "boolean",
-                                  "description": "false if the profile/CV doesn't clearly support this answer"},
-                },
-                "required": ["id", "value", "confident"],
-                "additionalProperties": False,
-            },
-        }
-    },
-    "required": ["answers"],
-    "additionalProperties": False,
-}
-
-
-def _answer_system() -> str:
-    return f"""You fill in job application form fields for a candidate. Answer truthfully, using only the
-profile and CV below. Never invent experience, certificates, or facts.
-
-Profile (authoritative):
-<profile>
-{yaml.safe_dump(profile(), allow_unicode=True, sort_keys=False)}
-</profile>
-
-CV:
-<cv>
-{cv_text()}
-</cv>
-
-Rules:
-- For select/radio fields, "value" must be exactly one of the given options (copy the text).
-- Numeric fields (input_type number, or the label asks "how many"): digits only.
-- "Years of experience with X": use profile.skill_years when X is listed (or clearly the same skill).
-  Otherwise, estimate conservatively from the CV, and set confident=false. Never answer above the CV's evidence.
-- Notice period: "2-4 weeks"; if the field is numeric in weeks answer 3, in days answer 21.
-- Salary: profile.expected_salary is empty, so answer "Negotiable" for text fields. For a required numeric salary
-  field, answer "" with confident=false (the human will fill it in).
-- Yes/no eligibility (authorized to work in Israel, can commute, etc.): answer from the profile.
-- If you cannot answer truthfully, return value "" and confident=false.
-- Free-text questions ("why do you want to join", summary): 2-3 honest sentences based on the CV and the job,
-  in the language the question is written in."""
-
-
-def answer_fields(fields: list[dict], job: dict) -> dict[str, tuple[str, bool]]:
-    """fields: [{id, kind, label, options?, input_type?, required}] -> {id: (value, confident)}"""
-    if not fields:
-        return {}
-    user = (f"Job: {job['title']} at {job['company']}\n"
-            f"Job description (excerpt):\n{(job.get('description') or '')[:4000]}\n\n"
-            f"Form fields to fill:\n{json.dumps(fields, ensure_ascii=False, indent=1)}")
-    out = _call(_answer_system(), user, ANSWER_SCHEMA, max_tokens=6000)
-    if not out:
-        return {}
-    return {a["id"]: (a["value"], a["confident"]) for a in out["answers"]}

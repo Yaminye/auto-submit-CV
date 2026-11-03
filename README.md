@@ -37,8 +37,17 @@ cp profile.example.yaml profile.yaml       # your answers (git-ignored) - check 
 .venv/bin/playwright install chromium      # only if Chrome isn't installed
 .venv/bin/python apply.py --login          # once: log in to LinkedIn in the opened Chrome
 .venv/bin/python apply.py --dry-run        # fills forms, never submits
-.venv/bin/python apply.py                  # fills, stops before Submit, you approve y/s/q
+.venv/bin/python apply.py                  # fills known answers, stops on new questions + before Submit
 .venv/bin/python score.py [--rescore]      # (re)score jobs by hand
 ```
-Answers you confirm are cached in `data/answers.json` (edit freely). Max 15 applications/day (`config.yaml`).
-Fields Claude isn't sure about are marked `<-- check` - fix them in the browser before pressing `y`.
+Form filling never guesses: it fills only answers from `profile.yaml` and answers you gave before
+(`data/answers.json`, edit freely). A new required question -> it stops, you answer in the browser,
+press `c`, and your answer is saved. Max 15 applications/day (`config.yaml`).
+
+## Dashboard
+```bash
+.venv/bin/python dashboard.py              # http://127.0.0.1:8765
+```
+Every job in the DB: queue / review / applied / low / dropped-by-filters (with the reason),
+full description, Claude's score + reason, and the exact answers sent for each application.
+Move jobs between queue / review / skipped from the job panel.

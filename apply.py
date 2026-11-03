@@ -1,8 +1,12 @@
 """Semi-auto LinkedIn Easy Apply.
 
-Opens a real Chrome (own profile in data/chrome-profile - log in once), goes through jobs with
-status='queued' (score >= apply_threshold), fills each Easy Apply form with Claude's help and STOPS
-before "Submit application" so you approve every one in the terminal.
+Opens a real Chrome (own profile in data/chrome-profile - log in once) and goes through jobs with
+status='queued' (score >= apply_threshold). For each Easy Apply form step:
+  - uploads the CV if it's missing
+  - fills ONLY known answers: profile.yaml + answers you approved before (data/answers.json)
+  - a NEW question -> stops, you answer it in the browser, and your answer is saved for next time
+  - stops before "Submit application" so you approve every application
+The description and the answers sent are saved to the DB (see dashboard.py).
 
   .venv/bin/python apply.py              # normal run
   .venv/bin/python apply.py --dry-run    # fill forms, never submit (discards at the end)
@@ -13,7 +17,6 @@ import argparse
 import json
 import os
 import random
-import re
 import sys
 import time
 from pathlib import Path
@@ -22,10 +25,11 @@ import yaml
 from dotenv import load_dotenv
 from playwright.sync_api import Page, TimeoutError as PWTimeout, sync_playwright
 
+from jobfinder import db
+from jobfinder.known_answers import lookup, norm
+
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
-
-from jobfinder import claude, db  # noqa: E402  (after load_dotenv so the SDK sees the key)
 
 PROFILE_DIR = ROOT / "data" / "chrome-profile"
 ANSWER_CACHE = ROOT / "data" / "answers.json"
@@ -38,10 +42,12 @@ NEXT_BTN = "button[aria-label='Continue to next step'], button:has-text('Next')"
 DISMISS_BTN = "button[aria-label='Dismiss']"
 DISCARD_BTN = "button[data-control-name='discard_application_confirm_btn'], button:has-text('Discard')"
 FIELD_ERROR = ".artdeco-inline-feedback--error"
+JOB_DESCRIPTION = "#job-details, div.jobs-description__content, div.jobs-description-content__text"
 
-# Collect empty fields of the current Easy Apply step and tag them with data-as-id.
+# Fields of the current Easy Apply step. all=false -> only empty ones (tagged with data-as-id).
+# all=true -> every field with its current value (to read back what you typed).
 COLLECT_JS = r"""
-(root) => {
+(root, all) => {
   const out = []; let i = 0;
   const undouble = s => {  // "QuestionQuestion" (visible + visually-hidden copy) -> "Question"
     const h = s.length / 2;
@@ -56,30 +62,33 @@ COLLECT_JS = r"""
     return clean(el.getAttribute('aria-label') || el.placeholder || '');
   };
   const req = el => el.required || el.getAttribute('aria-required') === 'true';
+  const tag = el => { const id = 'f' + (i++); el.setAttribute('data-as-id', id); return id; };
+
   root.querySelectorAll('input[type=text], input[type=number], input[type=tel], input[type=email], input[type=url], input:not([type]), textarea')
     .forEach(el => {
-      if (!visible(el) || (el.value && el.value.trim())) return;
-      const id = 'f' + (i++); el.setAttribute('data-as-id', id);
-      out.push({id, kind: el.tagName === 'TEXTAREA' ? 'textarea' : 'text', input_type: el.type || 'text',
-                label: labelOf(el), required: req(el)});
+      if (!visible(el)) return;
+      const value = (el.value || '').trim();
+      if (value && !all) return;
+      out.push({id: tag(el), kind: el.tagName === 'TEXTAREA' ? 'textarea' : 'text', input_type: el.type || 'text',
+                label: labelOf(el), required: req(el), value});
     });
   root.querySelectorAll('select').forEach(el => {
     if (!visible(el)) return;
     const cur = el.options[el.selectedIndex];
-    if (cur && el.selectedIndex > 0 && !/select an option/i.test(cur.text)) return;
+    const value = (cur && el.selectedIndex > 0 && !/select an option/i.test(cur.text)) ? cur.text.trim() : '';
+    if (value && !all) return;
     const opts = [...el.options].map(o => o.text.trim()).filter(t => t && !/^select an option$/i.test(t));
-    const id = 'f' + (i++); el.setAttribute('data-as-id', id);
-    out.push({id, kind: 'select', label: labelOf(el), options: opts, required: req(el)});
+    out.push({id: tag(el), kind: 'select', label: labelOf(el), options: opts, required: req(el), value});
   });
   root.querySelectorAll('fieldset').forEach(fs => {
     const radios = [...fs.querySelectorAll('input[type=radio]')];
-    if (!radios.length || radios.some(r => r.checked)) return;
-    const opts = radios.map(r => {
-      const l = r.id && fs.querySelector(`label[for="${CSS.escape(r.id)}"]`);
-      return clean(l ? l.innerText : r.value);
-    });
-    const id = 'f' + (i++); fs.setAttribute('data-as-id', id);
-    out.push({id, kind: 'radio', label: clean(fs.querySelector('legend')?.innerText), options: opts, required: true});
+    if (!radios.length) return;
+    const text = r => { const l = r.id && fs.querySelector(`label[for="${CSS.escape(r.id)}"]`); return clean(l ? l.innerText : r.value); };
+    const checked = radios.find(r => r.checked);
+    const value = checked ? text(checked) : '';
+    if (value && !all) return;
+    out.push({id: tag(fs), kind: 'radio', label: clean(fs.querySelector('legend')?.innerText),
+              options: radios.map(text), required: true, value});
   });
   return out;
 }
@@ -91,7 +100,7 @@ CLICK_RADIO_JS = r"""
   for (const r of fs.querySelectorAll('input[type=radio]')) {
     const l = r.id && fs.querySelector(`label[for="${CSS.escape(r.id)}"]`);
     const txt = norm(l ? l.innerText : r.value);
-    if (txt === norm(value) || txt.split(' ')[0] === norm(value)) { (l || r).click(); return true; }
+    if (txt === norm(value) || txt.startsWith(norm(value))) { (l || r).click(); return true; }
   }
   return false;
 }
@@ -100,10 +109,6 @@ CLICK_RADIO_JS = r"""
 
 def pause(a=0.8, b=2.2):
     time.sleep(random.uniform(a, b))
-
-
-def norm_label(label: str) -> str:
-    return re.sub(r"\s+", " ", label).strip().lower()
 
 
 def load_cache() -> dict:
@@ -119,7 +124,7 @@ def save_cache(cache: dict) -> None:
 
 def ask(prompt: str, choices: str) -> str:
     while True:
-        a = input(f"{prompt} [{choices}] ").strip().lower()
+        a = input(f"{prompt} ").strip().lower()
         if a and a[0] in choices:
             return a[0]
 
@@ -134,6 +139,18 @@ def ensure_logged_in(page: Page) -> None:
         page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
 
 
+def save_description(con, page: Page, job: dict) -> None:
+    """Snapshot the description from the logged-in job page (postings get removed later)."""
+    try:
+        el = page.locator(JOB_DESCRIPTION).first
+        text = el.inner_text(timeout=5000).strip()
+    except PWTimeout:
+        return
+    if len(text) > len(job.get("description") or ""):
+        con.execute("UPDATE jobs SET description=? WHERE job_id=?", (text, job["job_id"]))
+        con.commit()
+
+
 def upload_resume_if_needed(modal, cv_path: str) -> None:
     file_inputs = modal.locator("input[type=file]")
     if file_inputs.count() == 0:
@@ -143,10 +160,10 @@ def upload_resume_if_needed(modal, cv_path: str) -> None:
         return
     for i in range(file_inputs.count()):
         inp = file_inputs.nth(i)
-        meta = (inp.get_attribute("id") or "") + (inp.get_attribute("name") or "")
-        if "cover" in meta.lower():
+        meta = ((inp.get_attribute("id") or "") + (inp.get_attribute("name") or "")).lower()
+        if "cover" in meta:
             continue
-        if "resume" in meta.lower() or "upload resume" in text or "resume" in text:
+        if "resume" in meta or "resume" in text or "cv" in text:
             inp.set_input_files(cv_path)
             print("   uploaded CV")
             pause(2, 3)
@@ -164,10 +181,7 @@ def fill_field(modal, page: Page, f: dict, value: str) -> bool:
             if opt.count() and opt.is_visible():
                 opt.click()
         elif f["kind"] == "select":
-            match = next((o for o in f["options"] if o.strip().lower() == value.strip().lower()), None)
-            if not match:
-                return False
-            loc.select_option(label=match)
+            loc.select_option(label=value)
         elif f["kind"] == "radio":
             return bool(loc.evaluate(CLICK_RADIO_JS, value))
         return True
@@ -175,31 +189,40 @@ def fill_field(modal, page: Page, f: dict, value: str) -> bool:
         return False
 
 
-def fill_step(modal, page: Page, job: dict, cache: dict, log: list) -> None:
-    fields = modal.evaluate(COLLECT_JS)
-    if not fields:
-        return
-    todo = []
+def fill_step(modal, page: Page, profile: dict, cache: dict, log: list) -> str:
+    """Fill known answers; stop on new required questions. Returns 'ok' / 'skip' / 'quit'."""
+    fields = modal.evaluate(COLLECT_JS, False)
+    new = []
     for f in fields:
-        cached = cache.get(norm_label(f["label"]))
-        if cached and (f["kind"] in ("text", "textarea") or cached in f.get("options", [])):
-            if fill_field(modal, page, f, cached):
-                log.append((f["label"], cached, "cache"))
-                continue
-        todo.append(f)
-    if not todo:
-        return
-    answers = claude.answer_fields(todo, job)
-    for f in todo:
-        value, confident = answers.get(f["id"], ("", False))
-        if not value:
-            log.append((f["label"], "", "NEEDS YOU"))
-            continue
-        ok = fill_field(modal, page, f, value)
-        log.append((f["label"], value, "ok" if ok and confident else "CHECK"))
-        if ok and confident and f["kind"] != "textarea":   # don't cache job-specific free text
-            cache[norm_label(f["label"])] = value
+        hit = lookup(f, profile, cache)
+        if hit and fill_field(modal, page, f, hit[0]):
+            log.append({"label": f["label"], "value": hit[0], "source": hit[1]})
+        else:
+            new.append(f)
     pause()
+
+    if not any(f["required"] for f in new):
+        for f in new:
+            log.append({"label": f["label"], "value": "", "source": "left empty (optional)"})
+        return "ok"
+
+    print("   NEW questions - answer them in the browser:")
+    for f in new:
+        opts = f"  options: {', '.join(f['options'])}" if f.get("options") else ""
+        print(f"     • {f['label']}{' (required)' if f['required'] else ''}{opts}")
+    a = ask("   Done? [c]ontinue / [s]kip job / [q]uit:", "csq")
+    if a != "c":
+        return "skip" if a == "s" else "quit"
+
+    # read back what you typed and remember it
+    now = {norm(f["label"]): f["value"] for f in modal.evaluate(COLLECT_JS, True)}
+    for f in new:
+        value = now.get(norm(f["label"]), "")
+        log.append({"label": f["label"], "value": value, "source": "you"})
+        if value:
+            cache[norm(f["label"])] = value
+    save_cache(cache)
+    return "ok"
 
 
 def click_first_visible(modal, selector: str) -> bool:
@@ -222,50 +245,51 @@ def discard(page: Page) -> None:
 
 
 def print_log(log: list) -> None:
-    for label, value, how in log:
-        flag = "  <-- check" if how in ("CHECK", "NEEDS YOU") else ""
-        print(f"     {label[:70]:70} = {value[:50]}{flag}")
+    print("   Answers:")
+    for e in log:
+        print(f"     {e['label'][:65]:65} = {e['value'][:40]:40} ({e['source']})")
 
 
-def apply_one(page: Page, job: dict, cfg: dict, cache: dict, dry_run: bool) -> str:
-    """Returns: applied / skipped / external / failed / quit"""
+def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict, dry_run: bool) -> tuple[str, list]:
+    """Returns (result, answers log). result: applied / skipped / external / failed / quit"""
     print(f"\n=== [{job['score']}] {job['title']} @ {job['company']}\n    {job['url']}\n    {job['match_reason']}")
     page.goto(job["url"], wait_until="domcontentloaded")
     pause(2.5, 4.5)
+    save_description(con, page, job)
 
     btn = page.locator(EASY_APPLY_BTN).first
     if btn.count() == 0 or not btn.is_visible():
         if page.locator("text=/Applied .* ago/").count():
             print("   already applied")
-            return "applied"
+            return "applied", []
         print("   no Easy Apply (external site) - skipping")
-        return "external"
+        return "external", []
     btn.click()
     try:
         page.locator(MODAL).first.wait_for(state="visible", timeout=10000)
     except PWTimeout:
-        return "failed"
+        return "failed", []
     modal = page.locator(MODAL).first
     log: list = []
 
     for _ in range(15):
         pause(1.2, 2.0)
         upload_resume_if_needed(modal, cfg["cv_path"])
-        fill_step(modal, page, job, cache, log)
+        step = fill_step(modal, page, profile, cache, log)
+        if step != "ok":
+            discard(page)
+            return ("quit" if step == "quit" else "skipped"), log
 
         if modal.locator(SUBMIT_BTN).count() and modal.locator(SUBMIT_BTN).first.is_visible():
             print_log(log)
             if dry_run:
                 print("   [dry-run] reached Submit - discarding")
                 discard(page)
-                return "skipped"
-            a = ask("   Submit? (edit fields in the browser first if needed) [y]es/[s]kip/[q]uit", "ysq")
-            if a == "q":
+                return "skipped", log
+            a = ask("   Submit? (check the form in the browser) [y]es / [s]kip / [q]uit:", "ysq")
+            if a != "y":
                 discard(page)
-                return "quit"
-            if a == "s":
-                discard(page)
-                return "skipped"
+                return ("quit" if a == "q" else "skipped"), log
             click_first_visible(modal, SUBMIT_BTN)
             pause(2.5, 4)
             try:  # close the "application sent" dialog
@@ -273,28 +297,26 @@ def apply_one(page: Page, job: dict, cfg: dict, cache: dict, dry_run: bool) -> s
             except PWTimeout:
                 pass
             print("   ✔ submitted")
-            return "applied"
+            return "applied", log
 
         if not (click_first_visible(modal, REVIEW_BTN) or click_first_visible(modal, NEXT_BTN)):
-            print_log(log)
-            a = ask("   Stuck (no Next/Review). Fix it in the browser, then [c]ontinue / [s]kip / [q]uit", "csq")
+            a = ask("   Stuck (no Next/Review). Fix it in the browser, then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
                 discard(page)
-                return "quit" if a == "q" else "skipped"
+                return ("quit" if a == "q" else "skipped"), log
             continue
 
         pause(1.0, 1.8)
         if modal.locator(FIELD_ERROR).count():
-            print_log(log)
-            a = ask("   Some fields are invalid (red in the browser). Fix them, then [c]ontinue / [s]kip / [q]uit", "csq")
+            a = ask("   Some fields are invalid (red in the browser). Fix them, then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
                 discard(page)
-                return "quit" if a == "q" else "skipped"
+                return ("quit" if a == "q" else "skipped"), log
             click_first_visible(modal, REVIEW_BTN) or click_first_visible(modal, NEXT_BTN)
 
     print("   too many steps - giving up")
     discard(page)
-    return "failed"
+    return "failed", log
 
 
 def main():
@@ -308,6 +330,7 @@ def main():
     cfg["cv_path"] = os.getenv("CV_PATH", "")
     if not Path(cfg["cv_path"]).exists():
         sys.exit("CV_PATH missing or not found - set it in .env")
+    profile = yaml.safe_load((ROOT / "profile.yaml").read_text())
 
     con = db.connect()
     if args.job:
@@ -337,11 +360,13 @@ def main():
         print(f"{len(jobs)} job(s) to go{' (dry-run)' if args.dry_run else ''}")
         for job in jobs:
             try:
-                result = apply_one(page, job, cfg, cache, args.dry_run)
+                result, log = apply_one(page, con, job, cfg, profile, cache, args.dry_run)
             except Exception as e:  # keep going on any page weirdness
                 print(f"   error: {e}")
-                result = "failed"
+                result, log = "failed", []
             save_cache(cache)
+            if log:
+                db.save_answers(con, job["job_id"], log, dry_run=args.dry_run)
             if result == "quit":
                 break
             if not args.dry_run:
