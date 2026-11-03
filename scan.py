@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
+for _n in ("httpx", "httpx2"):
+    logging.getLogger(_n).setLevel(logging.WARNING)   # hide per-request API logs
 log = logging.getLogger("scan")
 
 
