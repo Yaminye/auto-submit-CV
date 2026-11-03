@@ -12,7 +12,12 @@ EN_YEARS = re.compile(
 )
 # "5 שנות ניסיון", "3-5 שנים", "לפחות 5 שנים"
 HE_YEARS = re.compile(r"(\d{1,2})\s*\+?\s*(?:-|–)?\s*(\d{1,2})?\s*\+?\s*(?:שנות|שנים|שנה)")
-EXP_CONTEXT = re.compile(r"experien|\bexp\b|hands[- ]on|background|working|ניסיון|נסיון", re.I)
+EXP_CONTEXT = re.compile(
+    r"experien|\bexp\b|hands[- ]on|background|working|building|developing|professional|industry"
+    r"|production|as a |ניסיון|נסיון|בפיתוח|בתחום", re.I)
+# "at least 5 years", "minimum of 5", "over 5 years", "לפחות 5"
+STRONG_PREFIX = re.compile(r"(?:at least|minimum(?: of)?|min\.?|over|more than|לפחות|מעל)\s*$", re.I)
+NOT_EXP = re.compile(r"founded|ago|since|old\b|history|in business|track record of|הוקמה|לפני", re.I)
 
 DEGREE = re.compile(r"m\.?\s?sc|master'?s|\bms\b|ph\.?\s?d|doctorate|תואר שני|דוקטורט", re.I)
 MUST = re.compile(r"requir|must|mandatory|חובה|נדרש", re.I)
@@ -32,7 +37,12 @@ def years_required(text: str) -> int | None:
     for rx in (EN_YEARS, HE_YEARS):
         for m in rx.finditer(text):
             ctx = text[max(0, m.start() - 60): m.end() + 60]
-            if not EXP_CONTEXT.search(ctx):
+            if NOT_EXP.search(text[max(0, m.start() - 30): m.end() + 15]):
+                continue
+            token = m.group(0)
+            strong = ("+" in token or "plus" in token.lower() or m.group(2)
+                      or STRONG_PREFIX.search(text[max(0, m.start() - 20): m.start()]))
+            if not strong and not EXP_CONTEXT.search(ctx):
                 continue
             n = _to_int(m.group(1))
             if n is not None and 0 < n <= 20:
