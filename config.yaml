@@ -1,0 +1,74 @@
+location: Israel
+geo_id: "101620260"        # LinkedIn geoId for Israel
+posted_within_hours: 48     # only jobs from the last 1-2 days
+max_years_required: 4       # drop jobs asking for MORE than this
+pages_per_query: 8          # 10 jobs per page
+exclude_senior_titles: true
+
+# category -> search keywords
+queries:
+  Backend:
+    - Backend Developer
+    - Backend Engineer
+    - Python Developer
+    - Node.js Developer
+    - Server Side Developer
+  Full Stack:
+    - Full Stack Developer
+    - Fullstack Engineer
+  AI Engineer:
+    - AI Engineer
+    - LLM Engineer
+    - GenAI Engineer
+    - Machine Learning Engineer
+  Data Science:
+    - Data Scientist
+    - Junior Data Scientist
+
+title_exclude:
+  - senior
+  - "sr."
+  - "sr "
+  - lead
+  - staff
+  - principal
+  - architect
+  - head of
+  - manager
+  - director
+  - "vp "
+  - ראש צוות
+  - בכיר
+  - devops
+  - qa
+  - frontend
+  - front-end
+  - android
+  - ios
+
+company_blacklist: []
+
+# title must contain at least one of these (search returns noise)
+title_include:
+  - backend
+  - back-end
+  - back end
+  - server
+  - full stack
+  - fullstack
+  - full-stack
+  - python
+  - node
+  - software
+  - developer
+  - engineer
+  - "ai "
+  - "ai/"
+  - llm
+  - genai
+  - machine learning
+  - "ml "
+  - data scien
+  - מפתח
+  - מפתחת
+  - תוכניתן
