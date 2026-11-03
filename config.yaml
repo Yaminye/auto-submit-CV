@@ -5,6 +5,11 @@ max_years_required: 4       # drop jobs asking for MORE than this
 pages_per_query: 8          # 10 jobs per page
 exclude_senior_titles: true
 
+# Claude match score (0-100) vs your CV
+apply_threshold: 70         # >= this -> apply queue
+review_threshold: 50        # 50-69 -> saved for review, not applied
+max_applications_per_day: 15
+
 # category -> search keywords
 queries:
   Backend:

@@ -24,11 +24,27 @@ CREATE TABLE IF NOT EXISTS jobs (
 """
 
 
+# columns added after v1 - applied as migrations on existing DBs
+EXTRA_COLUMNS = {
+    "description": "TEXT",
+    "score": "INTEGER",
+    "match_reason": "TEXT",
+    "applied_at": "TEXT",
+    "apply_note": "TEXT",
+}
+# status: new -> queued (score>=apply) / review (>=review) / low  -> applied / skipped / external / failed
+
+
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(exist_ok=True)
     con = sqlite3.connect(DB_PATH)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    have = {r[1] for r in con.execute("PRAGMA table_info(jobs)")}
+    for col, typ in EXTRA_COLUMNS.items():
+        if col not in have:
+            con.execute(f"ALTER TABLE jobs ADD COLUMN {col} {typ}")
+    con.commit()
     return con
 
 
@@ -43,22 +59,55 @@ def known_title_company(con) -> set[tuple[str, str]]:
 def insert(con, job: dict, keep: bool, reason: str) -> None:
     con.execute(
         """INSERT OR IGNORE INTO jobs
-           (job_id, category, title, company, location, posted, url, years, applicants, keep, reason, found_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+           (job_id, category, title, company, location, posted, url, years, applicants, keep, reason,
+            found_at, description)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
         (job["job_id"], job["category"], job["title"], job["company"], job["location"],
          job["posted"], job["url"], job.get("years"), job.get("applicants", ""),
-         int(keep), reason, datetime.now().isoformat(timespec="seconds")),
+         int(keep), reason, datetime.now().isoformat(timespec="seconds"),
+         job.get("description") if keep else None),
     )
     con.commit()
 
 
 def unsent(con) -> list[sqlite3.Row]:
     return con.execute(
-        "SELECT * FROM jobs WHERE keep=1 AND sent_at IS NULL ORDER BY category, posted DESC"
+        "SELECT * FROM jobs WHERE keep=1 AND sent_at IS NULL ORDER BY score DESC NULLS LAST, category"
     ).fetchall()
 
 
 def mark_sent(con, ids: list[str]) -> None:
     now = datetime.now().isoformat(timespec="seconds")
     con.executemany("UPDATE jobs SET sent_at=? WHERE job_id=?", [(now, i) for i in ids])
+    con.commit()
+
+
+def unscored(con) -> list[sqlite3.Row]:
+    return con.execute("SELECT * FROM jobs WHERE keep=1 AND score IS NULL").fetchall()
+
+
+def set_score(con, job_id: str, score: int, reason: str, status: str, description: str | None = None) -> None:
+    con.execute(
+        "UPDATE jobs SET score=?, match_reason=?, status=?, description=COALESCE(?, description) WHERE job_id=?",
+        (score, reason, status, description, job_id),
+    )
+    con.commit()
+
+
+def queued(con, limit: int | None = None) -> list[sqlite3.Row]:
+    sql = "SELECT * FROM jobs WHERE keep=1 AND status='queued' ORDER BY score DESC, found_at DESC"
+    if limit:
+        sql += f" LIMIT {int(limit)}"
+    return con.execute(sql).fetchall()
+
+
+def applied_today(con) -> int:
+    today = datetime.now().date().isoformat()
+    return con.execute("SELECT COUNT(*) FROM jobs WHERE status='applied' AND applied_at >= ?", (today,)).fetchone()[0]
+
+
+def set_status(con, job_id: str, status: str, note: str = "") -> None:
+    applied_at = datetime.now().isoformat(timespec="seconds") if status == "applied" else None
+    con.execute("UPDATE jobs SET status=?, apply_note=?, applied_at=COALESCE(?, applied_at) WHERE job_id=?",
+                (status, note, applied_at, job_id))
     con.commit()

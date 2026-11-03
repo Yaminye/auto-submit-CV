@@ -3,11 +3,15 @@ import logging
 import sys
 from pathlib import Path
 
+import os
+
 import yaml
+from dotenv import load_dotenv
 
 from jobfinder import db, filters, linkedin
 
 ROOT = Path(__file__).resolve().parent
+load_dotenv(ROOT / ".env")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s",
                     handlers=[logging.StreamHandler(sys.stdout)])
 log = logging.getLogger("scan")
@@ -52,6 +56,12 @@ def main():
                 linkedin._pause(1.0, 2.5)
 
     log.info("done: kept=%d dropped=%d", kept, dropped)
+
+    if os.getenv("ANTHROPIC_API_KEY"):
+        from score import score_pending
+        score_pending(con, cfg)
+    else:
+        log.info("ANTHROPIC_API_KEY not set - skipping Claude scoring")
 
 
 if __name__ == "__main__":

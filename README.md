@@ -24,3 +24,21 @@ cp .env.example .env        # fill Gmail app password and/or Telegram bot
 ```
 
 Tune keywords and filters in `config.yaml`.
+
+## Auto-apply (semi-auto, LinkedIn Easy Apply)
+After each scan, Claude scores every job against your CV (0-100):
+- **≥ 70** → `queued` for apply
+- **50-69** → `review` (shown in the digest, not applied - use it to tune the threshold)
+- **< 50** → `low`
+
+```bash
+cp profile.example.yaml profile.yaml       # your answers (git-ignored) - check skill_years!
+# .env: ANTHROPIC_API_KEY=..., CV_PATH=/abs/path/cv.pdf
+.venv/bin/playwright install chromium      # only if Chrome isn't installed
+.venv/bin/python apply.py --login          # once: log in to LinkedIn in the opened Chrome
+.venv/bin/python apply.py --dry-run        # fills forms, never submits
+.venv/bin/python apply.py                  # fills, stops before Submit, you approve y/s/q
+.venv/bin/python score.py [--rescore]      # (re)score jobs by hand
+```
+Answers you confirm are cached in `data/answers.json` (edit freely). Max 15 applications/day (`config.yaml`).
+Fields Claude isn't sure about are marked `<-- check` - fix them in the browser before pressing `y`.
