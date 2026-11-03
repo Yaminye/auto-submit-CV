@@ -3,47 +3,94 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Job Tracker</title>
+<title>Job Search</title>
 <style>
 :root {
-  --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #667085; --line: #e4e7ec;
-  --hover: #f1f4f8; --accent: #2563eb; --accent-soft: #e8efff;
-  --green: #15803d; --green-soft: #e7f6ec; --amber: #b45309; --amber-soft: #fdf3e2;
-  --red: #b91c1c; --red-soft: #fdecec; --purple: #6d28d9; --purple-soft: #f1ebfe;
-  --gray: #475467; --gray-soft: #eef0f3; --shadow: 0 10px 30px rgba(16,24,40,.12);
+  --bg: #f5f6f8; --panel: #ffffff; --col: #eceef2; --text: #1b1f24; --muted: #667085; --line: #e0e4ea;
+  --hover: #f3f5f8; --accent: #2563eb; --accent-soft: #e6eeff;
+  --green: #15803d; --green-soft: #e3f5e9; --amber: #b45309; --amber-soft: #fdf1dc;
+  --red: #b91c1c; --red-soft: #fdeaea; --purple: #6d28d9; --purple-soft: #efe8fe;
+  --gray: #475467; --gray-soft: #e7eaee;
+  --c-backend: #2563eb; --c-fullstack: #0d9488; --c-ai: #7c3aed; --c-ds: #d97706; --c-devops: #16a34a; --c-other: #94a3b8;
+  --shadow: 0 12px 32px rgba(16, 24, 40, .16); --card-shadow: 0 1px 2px rgba(16, 24, 40, .06);
 }
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f1216; --panel: #171b21; --text: #e6e9ee; --muted: #8b95a5; --line: #262c35;
-    --hover: #1e242c; --accent: #6ea0ff; --accent-soft: #1b2a45;
-    --green: #4ade80; --green-soft: #13301f; --amber: #fbbf24; --amber-soft: #33270f;
+    --bg: #0e1115; --panel: #181c22; --col: #13171c; --text: #e6e9ee; --muted: #8b95a5; --line: #272d36;
+    --hover: #1f252d; --accent: #6ea0ff; --accent-soft: #1b2a45;
+    --green: #4ade80; --green-soft: #12301e; --amber: #fbbf24; --amber-soft: #33270f;
     --red: #f87171; --red-soft: #3a1717; --purple: #b794f6; --purple-soft: #2a1f45;
-    --gray: #a6b0bf; --gray-soft: #232a33; --shadow: 0 10px 30px rgba(0,0,0,.5);
+    --gray: #a6b0bf; --gray-soft: #242b34;
+    --c-backend: #60a5fa; --c-fullstack: #2dd4bf; --c-ai: #a78bfa; --c-ds: #fbbf24; --c-devops: #4ade80; --c-other: #64748b;
+    --shadow: 0 12px 32px rgba(0, 0, 0, .55); --card-shadow: none;
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text);
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); display: flex; flex-direction: column;
   font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans Hebrew", sans-serif; }
-header { padding: 20px 24px 8px; }
-h1 { font-size: 20px; margin: 0 0 14px; font-weight: 650; }
-.stats { display: flex; flex-wrap: wrap; gap: 8px; }
-.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; min-width: 96px; }
-.stat b { display: block; font-size: 20px; font-variant-numeric: tabular-nums; }
-.stat span { color: var(--muted); font-size: 12px; }
-.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 14px 24px; position: sticky; top: 0;
-  background: var(--bg); z-index: 2; border-bottom: 1px solid var(--line); }
-.tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-right: auto; }
-.tab { border: 1px solid transparent; background: none; color: var(--muted); padding: 6px 12px; border-radius: 8px;
-  cursor: pointer; font: inherit; }
-.tab:hover { background: var(--hover); color: var(--text); }
-.tab.on { background: var(--panel); border-color: var(--line); color: var(--text); font-weight: 600; }
-.tab .n { color: var(--muted); font-weight: 400; margin-left: 4px; font-variant-numeric: tabular-nums; }
+button { font: inherit; }
+
+/* top bar */
+.top { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 20px;
+  background: var(--panel); border-bottom: 1px solid var(--line); }
+.top h1 { font-size: 17px; margin: 0 6px 0 0; font-weight: 650; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+.seg button { border: 0; background: none; color: var(--muted); padding: 6px 14px; cursor: pointer; }
+.seg button.on { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.spacer { flex: 1; }
 input[type=search], select { font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 6px 10px; }
-input[type=search] { width: 220px; max-width: 100%; }
-main { padding: 0 24px 40px; }
-table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line);
-  border-radius: 12px; overflow: hidden; margin-top: 14px; }
+input[type=search] { width: 230px; max-width: 100%; }
+.summary { width: 100%; color: var(--muted); font-size: 13px; }
+.summary b { color: var(--text); font-variant-numeric: tabular-nums; }
+.summary .tip { margin-left: 8px; }
+.view { flex: 1; min-height: 0; overflow: auto; }
+
+/* board */
+.board { display: flex; gap: 12px; padding: 16px 20px 20px; overflow-x: auto; height: 100%; align-items: flex-start; }
+.col { flex: 0 0 272px; background: var(--col); border: 1px solid var(--line); border-radius: 12px;
+  display: flex; flex-direction: column; max-height: 100%; }
+.col.over { outline: 2px dashed var(--accent); outline-offset: -2px; background: var(--accent-soft); }
+.ch { padding: 12px 12px 8px; display: flex; gap: 9px; align-items: flex-start; }
+.ch[data-toggle] { cursor: pointer; }
+.ch svg { width: 18px; height: 18px; flex: 0 0 auto; color: var(--muted); margin-top: 1px;
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ch .name { font-weight: 650; font-size: 12.5px; letter-spacing: .05em; text-transform: uppercase; }
+.ch .cnt { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ch .hint { color: var(--muted); font-size: 11.5px; margin-top: 2px; }
+.cards { padding: 2px 10px 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 64px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--cat);
+  border-radius: 8px; padding: 9px 10px 8px; cursor: grab; box-shadow: var(--card-shadow); }
+.card:hover { border-color: var(--accent); border-left-color: var(--cat); }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.card.sel { border-color: var(--accent); border-left-color: var(--cat); background: var(--accent-soft); }
+.card.dragging { opacity: .4; }
+.card .t { font-weight: 600; font-size: 13.5px; line-height: 1.3; }
+.card .co { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.card .ft { display: flex; align-items: center; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+.card .ago { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.colempty { color: var(--muted); font-size: 12px; text-align: center; padding: 16px 6px;
+  border: 1px dashed var(--line); border-radius: 8px; }
+.col.collapsed { flex-basis: 50px; cursor: pointer; }
+.col.collapsed .cards, .col.collapsed .hint { display: none; }
+.col.collapsed .ch { flex-direction: column; align-items: center; padding: 12px 0; }
+.col.collapsed .name { writing-mode: vertical-rl; transform: rotate(180deg); margin-top: 6px; }
+.col.collapsed .cnt { text-align: center; }
+
+/* badges */
+.b { display: inline-block; font-size: 11px; font-weight: 650; padding: 1px 6px; border-radius: 5px; line-height: 16px;
+  white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sc-hi { background: var(--accent-soft); color: var(--accent); }
+.sc-mid { background: var(--amber-soft); color: var(--amber); }
+.sc-lo, .sc-none, .b-dim { background: var(--gray-soft); color: var(--gray); }
+.b-new { background: var(--green-soft); color: var(--green); }
+.b-ext { background: var(--purple-soft); color: var(--purple); }
+.b-fail { background: var(--red-soft); color: var(--red); }
+
+/* list */
+.list { padding: 16px 20px 40px; }
+table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
 th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 10px 12px;
   border-bottom: 1px solid var(--line); white-space: nowrap; }
 td { padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -51,89 +98,130 @@ tr:last-child td { border-bottom: 0; }
 tbody tr { cursor: pointer; }
 tbody tr:hover { background: var(--hover); }
 tbody tr.sel { background: var(--accent-soft); }
-.t { font-weight: 600; }
-.c { color: var(--muted); font-size: 13px; }
-.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.score { display: inline-block; min-width: 34px; text-align: center; padding: 2px 6px; border-radius: 6px;
-  font-weight: 700; font-variant-numeric: tabular-nums; }
-.pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
-.s-queued, .sc-hi { background: var(--accent-soft); color: var(--accent); }
-.s-review, .sc-mid { background: var(--amber-soft); color: var(--amber); }
-.s-applied { background: var(--green-soft); color: var(--green); }
-.s-failed { background: var(--red-soft); color: var(--red); }
-.s-external { background: var(--purple-soft); color: var(--purple); }
-.s-low, .s-skipped, .s-new, .s-dropped, .sc-lo, .sc-none { background: var(--gray-soft); color: var(--gray); }
-.empty { padding: 40px; text-align: center; color: var(--muted); }
+.lt { font-weight: 600; }
+.lc { color: var(--muted); font-size: 13px; }
 .why { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.empty { padding: 40px; text-align: center; color: var(--muted); }
+
 /* drawer */
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%); background: var(--panel);
-  border-left: 1px solid var(--line); box-shadow: var(--shadow); transform: translateX(100%); transition: transform .2s;
+  border-left: 1px solid var(--line); box-shadow: var(--shadow); transform: translateX(105%); transition: transform .2s;
   z-index: 5; display: flex; flex-direction: column; }
 .drawer.open { transform: none; }
-.dh { padding: 18px 20px 12px; border-bottom: 1px solid var(--line); }
-.dh h2 { margin: 0 32px 4px 0; font-size: 18px; }
-.x { position: absolute; top: 14px; right: 14px; border: 0; background: none; font-size: 22px; color: var(--muted); cursor: pointer; }
-.db { padding: 16px 20px 40px; overflow-y: auto; }
+.dh { padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+.dh h2 { margin: 0 32px 4px 0; font-size: 18px; line-height: 1.3; }
+.x { position: absolute; top: 12px; right: 12px; border: 0; background: none; font-size: 24px; line-height: 1;
+  color: var(--muted); cursor: pointer; padding: 4px 8px; }
+.dbody { padding: 16px 20px 40px; overflow-y: auto; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 6px 12px;
+.btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 6px 12px;
   border-radius: 8px; cursor: pointer; text-decoration: none; }
-.btn:hover { background: var(--hover); }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-.meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px 16px; margin: 4px 0 18px; }
-.meta div > span:first-child { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
-h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 22px 0 8px; }
+.stage-label { color: var(--muted); font-size: 12px; margin: 14px 0 6px; }
+.phases { display: flex; flex-wrap: wrap; gap: 6px; }
+.phase { font-size: 12.5px; border: 1px solid var(--line); background: var(--panel); color: var(--text);
+  padding: 4px 11px; border-radius: 999px; cursor: pointer; }
+.phase:hover { border-color: var(--accent); }
+.phase.on { background: var(--accent); border-color: var(--accent); color: #fff; cursor: default; }
+.meta { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px 16px; margin: 2px 0 16px; }
+.meta > div > span:first-child { display: block; color: var(--muted); font-size: 12px; margin-bottom: 2px; }
+h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 22px 0 8px; }
 .reason { background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-.desc { white-space: pre-wrap; line-height: 1.55; }
-.ans td { padding: 6px 8px; font-size: 13px; }
-.ans { margin-top: 0; }
-.src { color: var(--muted); font-size: 12px; }
+.desc { white-space: pre-wrap; line-height: 1.6; }
+.ans { margin: 0; } .ans td { padding: 6px 8px; font-size: 13px; }
+.src { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+/* toast */
+.toast { position: fixed; left: 50%; bottom: 20px; transform: translate(-50%, 16px); opacity: 0; pointer-events: none;
+  background: var(--text); color: var(--bg); padding: 9px 14px; border-radius: 10px; display: flex; gap: 14px;
+  align-items: center; transition: opacity .2s, transform .2s; z-index: 10; max-width: calc(100% - 32px); }
+.toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.toast button { background: none; border: 0; color: inherit; font-weight: 700; cursor: pointer; text-decoration: underline; padding: 0; }
+
 @media (max-width: 760px) {
-  header, .bar, main { padding-left: 16px; padding-right: 16px; }
-  .hide-sm { display: none; }
+  .top { padding: 12px 16px; }
+  .board { padding: 12px 16px 16px; }
+  .col { flex-basis: 252px; }
+  .list { padding: 12px 16px 32px; }
+  .hide-sm, .summary .tip { display: none; }
   input[type=search] { width: 100%; }
 }
 </style>
 </head>
 <body>
-<header>
-  <h1>Job Tracker</h1>
-  <div class="stats" id="stats"></div>
-</header>
-<div class="bar">
-  <div class="tabs" id="tabs"></div>
+<div class="top">
+  <h1>Job Search</h1>
+  <div class="seg" id="views">
+    <button data-v="board">Board</button>
+    <button data-v="list">List</button>
+  </div>
+  <div class="spacer"></div>
   <input type="search" id="q" placeholder="Search title / company…">
   <select id="cat"><option value="">All categories</option></select>
-  <select id="sort">
-    <option value="score">Sort: score</option>
-    <option value="new">Sort: newest</option>
-  </select>
+  <select id="phase" hidden></select>
+  <div class="summary" id="summary"></div>
 </div>
-<main id="main"></main>
+<div class="view" id="view"></div>
 
 <aside class="drawer" id="drawer" aria-hidden="true">
   <button class="x" id="close" aria-label="Close">×</button>
   <div class="dh" id="dh"></div>
-  <div class="db" id="db"></div>
+  <div class="dbody" id="dbody"></div>
 </aside>
+<div class="toast" id="toast" role="status"></div>
 
 <script>
-const TABS = [
-  ["queued", "Apply queue", j => j.keep && j.status === "queued"],
-  ["review", "Review 50–69", j => j.keep && j.status === "review"],
-  ["applied", "Applied", j => j.keep && j.status === "applied"],
-  ["low", "Low", j => j.keep && j.status === "low"],
-  ["other", "Skipped / external / failed", j => j.keep && ["skipped", "external", "failed"].includes(j.status)],
-  ["unscored", "Not scored", j => j.keep && j.score == null],
-  ["dropped", "Dropped by filters", j => !j.keep],
-  ["all", "All kept", j => j.keep],
+// Board columns. `set` = status written when you drop a card there; `statuses` = which DB statuses live there.
+const COLUMNS = [
+  {key: "review", title: "Review", hint: "score 50–69 · not applied", set: "review", statuses: ["review", "new"]},
+  {key: "queued", title: "To apply", hint: "score ≥ 70 · apply.py takes these", set: "queued", statuses: ["queued", "external", "failed"]},
+  {key: "applied", title: "Applied", set: "applied", statuses: ["applied"]},
+  {key: "assignment", title: "Assignment", hint: "home test / LeetCode", set: "assignment", statuses: ["assignment"]},
+  {key: "interview1", title: "Interview 1", set: "interview1", statuses: ["interview1"]},
+  {key: "interview2", title: "Interview 2", set: "interview2", statuses: ["interview2"]},
+  {key: "offer", title: "Offer", set: "offer", statuses: ["offer"]},
+  {key: "rejected", title: "Rejected", set: "rejected", statuses: ["rejected"]},
+  {key: "archive", title: "Not a fit", hint: "score < 50 or skipped", set: "skipped", statuses: ["low", "skipped"], collapsible: true},
 ];
-let jobs = [], tab = location.hash.slice(1) || "queued", selected = null;
+const ICONS = {
+  review: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  queued: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4 20-7z"/>',
+  applied: '<circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-6"/>',
+  assignment: '<path d="m16 18 6-6-6-6"/><path d="m8 6-6 6 6 6"/>',
+  interview1: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  interview2: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 10h8"/>',
+  offer: '<path d="m12 2 3.1 6.3 6.9 1-5 4.9 1.2 6.8L12 17.8 5.8 21l1.2-6.8-5-4.9 6.9-1z"/>',
+  rejected: '<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6M9 9l6 6"/>',
+  archive: '<rect x="2" y="3" width="20" height="5" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8M10 12h4"/>',
+};
+const CAT = {"Backend": "--c-backend", "Full Stack": "--c-fullstack", "AI Engineer": "--c-ai",
+             "Data Science": "--c-ds", "DevOps": "--c-devops"};
+const LATER = ["applied", "assignment", "interview1", "interview2", "offer", "rejected"];
+
+const store = {
+  get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+let jobs = [], selected = null;
+let view = store.get("view", "board");
+let collapsed = new Set(JSON.parse(store.get("collapsed", '["archive"]')));
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
 const day = s => s ? s.slice(0, 10) : "–";
 const scoreClass = s => s == null ? "sc-none" : s >= 70 ? "sc-hi" : s >= 50 ? "sc-mid" : "sc-lo";
-const statusOf = j => j.keep ? (j.status || "new") : "dropped";
+const colOf = j => COLUMNS.find(c => c.statuses.includes(j.status || "new")) || COLUMNS[0];
+const toTime = s => new Date(s.length <= 10 ? s + "T12:00:00" : s).getTime();
+const isNew = j => j.found_at && Date.now() - toTime(j.found_at) < 24 * 3600e3;
+function ago(s) {
+  if (!s) return "";
+  const m = Math.max(0, (Date.now() - toTime(s)) / 60000);
+  if (m < 60) return Math.round(m) + "m";
+  if (m < 1440) return Math.round(m / 60) + "h";
+  if (m < 43200) return Math.round(m / 1440) + "d";
+  return Math.round(m / 43200) + "mo";
+}
 
 async function load() {
   jobs = await (await fetch("/api/jobs")).json();
@@ -144,102 +232,208 @@ async function load() {
   render();
 }
 
-function render() {
-  const kept = jobs.filter(j => j.keep);
-  const today = new Date().toISOString().slice(0, 10);
-  const stats = [
-    ["In queue", kept.filter(j => j.status === "queued").length],
-    ["Review", kept.filter(j => j.status === "review").length],
-    ["Applied", kept.filter(j => j.status === "applied").length],
-    ["Applied today", kept.filter(j => (j.applied_at || "").startsWith(today)).length],
-    ["Kept total", kept.length],
-    ["Dropped", jobs.length - kept.length],
-    ["Not emailed yet", kept.filter(j => !j.sent_at).length],
-  ];
-  $("stats").innerHTML = stats.map(([l, n]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join("");
-  $("tabs").innerHTML = TABS.map(([k, l, f]) =>
-    `<button class="tab ${k === tab ? "on" : ""}" data-k="${k}">${l}<span class="n">${jobs.filter(f).length}</span></button>`).join("");
-
+function filtered() {
   const q = $("q").value.trim().toLowerCase(), cat = $("cat").value;
-  const filt = TABS.find(t => t[0] === tab)[2];
-  let rows = jobs.filter(filt)
-    .filter(j => !cat || j.category === cat)
-    .filter(j => !q || (j.title + " " + j.company).toLowerCase().includes(q));
-  rows.sort($("sort").value === "score"
-    ? (a, b) => (b.score ?? -1) - (a.score ?? -1) || (b.found_at > a.found_at ? 1 : -1)
-    : (a, b) => (b.found_at > a.found_at ? 1 : -1));
+  return jobs.filter(j => (!cat || j.category === cat) && (!q || (j.title + " " + j.company).toLowerCase().includes(q)));
+}
 
-  if (!rows.length) { $("main").innerHTML = '<div class="empty">No jobs here.</div>'; return; }
-  const dropped = tab === "dropped";
-  $("main").innerHTML = `<table><thead><tr>
+function render() {
+  document.querySelectorAll("#views button").forEach(b => b.classList.toggle("on", b.dataset.v === view));
+  $("phase").hidden = view !== "list";
+  const kept = jobs.filter(j => j.keep);
+  const n = key => kept.filter(j => colOf(j).key === key).length;
+  const interviewing = n("assignment") + n("interview1") + n("interview2");
+  $("summary").innerHTML =
+    `<b>${n("queued")}</b> to apply · <b>${n("review")}</b> to review · <b>${kept.filter(j => LATER.includes(j.status)).length}</b> applied` +
+    ` · <b>${interviewing}</b> in process · <b>${n("offer")}</b> offers · <b>${kept.filter(isNew).length}</b> new today` +
+    `<span class="tip">— drag a card to move it, click it for the full description</span>`;
+  view === "board" ? renderBoard() : renderList();
+}
+
+function card(j) {
+  const c = colOf(j), badges = [];
+  badges.push(j.score != null
+    ? `<span class="b ${scoreClass(j.score)}" title="Claude match score">${j.score}</span>`
+    : `<span class="b b-dim">not scored</span>`);
+  if (isNew(j)) badges.push('<span class="b b-new">NEW</span>');
+  if (j.status === "external") badges.push('<span class="b b-ext" title="No Easy Apply - apply on the company site, then drag it to Applied">company site</span>');
+  if (j.status === "failed") badges.push('<span class="b b-fail" title="apply.py could not finish - apply by hand">auto-apply failed</span>');
+  const applied = LATER.includes(j.status) && j.applied_at;
+  const when = applied ? ago(j.applied_at) : ago(j.found_at);
+  const tip = applied ? `applied ${day(j.applied_at)}` : `found ${day(j.found_at)} · posted ${day(j.posted)}`;
+  return `<article class="card ${j.job_id === selected ? "sel" : ""}" draggable="true" tabindex="0"
+      data-id="${j.job_id}" style="--cat: var(${CAT[j.category] || "--c-other"})">
+    <div class="t" dir="auto">${esc(j.title)}</div>
+    <div class="co" dir="auto">${esc(j.company)}</div>
+    <div class="ft">${badges.join("")}<span class="ago" title="${tip}">${when}</span></div>
+  </article>`;
+}
+
+function renderBoard() {
+  const groups = Object.fromEntries(COLUMNS.map(c => [c.key, []]));
+  filtered().filter(j => j.keep).forEach(j => groups[colOf(j).key].push(j));
+  const byScore = (a, b) => (b.score ?? -1) - (a.score ?? -1) || toTime(b.found_at) - toTime(a.found_at);
+  const byApplied = (a, b) => (b.applied_at || "").localeCompare(a.applied_at || "");
+  $("view").innerHTML = `<div class="board" id="board">${COLUMNS.map(c => {
+    const list = groups[c.key].sort(LATER.includes(c.key) ? byApplied : byScore);
+    const isCol = c.collapsible && collapsed.has(c.key);
+    return `<section class="col ${isCol ? "collapsed" : ""}" data-key="${c.key}">
+      <div class="ch" ${c.collapsible ? `data-toggle="${c.key}" title="${isCol ? "Show" : "Hide"} these jobs"` : ""}>
+        <svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[c.key]}</svg>
+        <div><div class="name">${c.title}</div><div class="cnt">${list.length} ${list.length === 1 ? "job" : "jobs"}</div>
+          ${c.hint ? `<div class="hint">${c.hint}</div>` : ""}</div>
+      </div>
+      <div class="cards">${list.length ? list.map(card).join("") : '<div class="colempty">Drop a job here</div>'}</div>
+    </section>`;
+  }).join("")}</div>`;
+}
+
+function renderList() {
+  const sel = $("phase");
+  if (!sel.options.length) {
+    sel.innerHTML = '<option value="all">All on the board</option>' +
+      COLUMNS.map(c => `<option value="${c.key}">${c.title}</option>`).join("") +
+      '<option value="dropped">Dropped by filters</option>';
+  }
+  const ph = sel.value || "all", dropped = ph === "dropped";
+  const rows = filtered().filter(j => dropped ? !j.keep : j.keep && (ph === "all" || colOf(j).key === ph))
+    .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || toTime(b.found_at) - toTime(a.found_at));
+  if (!rows.length) { $("view").innerHTML = '<div class="list"><div class="empty">No jobs here.</div></div>'; return; }
+  $("view").innerHTML = `<div class="list"><table><thead><tr>
       <th>${dropped ? "" : "Score"}</th><th>Job</th><th class="hide-sm">Category</th>
-      <th class="hide-sm">Yrs</th><th class="hide-sm">Posted</th><th>${dropped ? "Dropped because" : "Status"}</th>
+      <th class="hide-sm">Yrs</th><th class="hide-sm">Posted</th><th>${dropped ? "Dropped because" : "Stage"}</th>
     </tr></thead><tbody>${rows.map(j => `
     <tr data-id="${j.job_id}" class="${j.job_id === selected ? "sel" : ""}">
-      <td>${dropped ? "" : `<span class="score ${scoreClass(j.score)}">${j.score ?? "–"}</span>`}</td>
-      <td><div class="t" dir="auto">${esc(j.title)}</div><div class="c" dir="auto">${esc(j.company)}</div>
+      <td>${dropped ? "" : `<span class="b ${scoreClass(j.score)}">${j.score ?? "–"}</span>`}</td>
+      <td><div class="lt" dir="auto">${esc(j.title)}</div><div class="lc" dir="auto">${esc(j.company)}</div>
         ${j.match_reason && !dropped ? `<div class="why">${esc(j.match_reason)}</div>` : ""}</td>
       <td class="hide-sm">${esc(j.category)}</td>
       <td class="hide-sm num">${j.years ?? "–"}</td>
       <td class="hide-sm num">${day(j.posted)}</td>
-      <td>${dropped ? `<span class="c">${esc(j.reason)}</span>` : `<span class="pill s-${statusOf(j)}">${statusOf(j)}</span>`}</td>
-    </tr>`).join("")}</tbody></table>`;
+      <td>${dropped ? `<span class="lc">${esc(j.reason)}</span>` : esc(colOf(j).title)}</td>
+    </tr>`).join("")}</tbody></table></div>`;
 }
 
 async function openJob(id) {
-  selected = id; render();
+  selected = id;
+  document.querySelectorAll(".card.sel, tr.sel").forEach(e => e.classList.remove("sel"));
+  document.querySelectorAll(`[data-id="${id}"]`).forEach(e => e.classList.add("sel"));
   const j = await (await fetch(`/api/jobs/${id}`)).json();
-  const st = statusOf(j);
+  if (selected !== id) return;
+  const c = colOf(j), ans = j.apply_answers;
   $("dh").innerHTML = `
     <h2 dir="auto">${esc(j.title)}</h2>
-    <div class="c" dir="auto">${esc(j.company)} · ${esc(j.location)}</div>
-    <div class="actions">
-      <a class="btn primary" href="${esc(j.url)}" target="_blank" rel="noopener">Open on LinkedIn ↗</a>
-      ${j.keep ? ["queued", "review", "skipped"].filter(s => s !== st).map(s =>
-        `<button class="btn" data-set="${s}">${{queued: "Move to queue", review: "Move to review", skipped: "Skip"}[s]}</button>`).join("") : ""}
-    </div>`;
-  const ans = j.apply_answers;
-  $("db").innerHTML = `
+    <div class="lc" dir="auto">${esc(j.company)} · ${esc(j.location)}</div>
+    <div class="actions"><a class="btn primary" href="${esc(j.url)}" target="_blank" rel="noopener">Open on LinkedIn ↗</a></div>
+    ${j.keep ? `<div class="stage-label">Stage — click to move</div>
+      <div class="phases">${COLUMNS.map(p => `<button class="phase ${p.key === c.key ? "on" : ""}" data-move="${p.key}">${p.title}</button>`).join("")}</div>`
+      : `<div class="stage-label">Dropped by filters: ${esc(j.reason)}</div>`}`;
+  $("dbody").innerHTML = `
     <div class="meta">
-      <div><span>Status</span><span class="pill s-${st}">${st}</span></div>
-      <div><span>Score</span><span class="score ${scoreClass(j.score)}">${j.score ?? "–"}</span></div>
+      <div><span>Score</span><span class="b ${scoreClass(j.score)}">${j.score ?? "–"}</span></div>
       <div><span>Category</span>${esc(j.category)}</div>
       <div><span>Years asked</span>${j.years ?? "not stated"}</div>
       <div><span>Posted</span>${day(j.posted)}</div>
       <div><span>Found</span>${day(j.found_at)}</div>
-      <div><span>Emailed</span>${j.sent_at ? day(j.sent_at) : "not yet"}</div>
       <div><span>Applied</span>${j.applied_at ? day(j.applied_at) : "–"}</div>
     </div>
+    ${j.status === "external" ? '<div class="reason">No Easy Apply on LinkedIn — apply on the company site, then move it to <b>Applied</b>.</div>' : ""}
+    ${j.status === "failed" ? '<div class="reason">apply.py couldn\'t finish this one — apply by hand, then move it to <b>Applied</b>.</div>' : ""}
     ${j.match_reason ? `<h3>Why this score</h3><div class="reason">${esc(j.match_reason)}</div>` : ""}
-    ${!j.keep ? `<h3>Dropped because</h3><div class="reason">${esc(j.reason)}</div>` : ""}
     ${ans ? `<h3>Answers ${ans.dry_run ? "(dry run – not sent)" : "sent"} · ${esc(day(ans.at))}</h3>
       <table class="ans"><tbody>${ans.answers.map(a => `<tr><td dir="auto">${esc(a.label)}</td>
         <td dir="auto"><b>${esc(a.value) || "–"}</b></td><td class="src">${esc(a.source)}</td></tr>`).join("")}</tbody></table>` : ""}
     <h3>Description</h3>
-    <div class="desc" dir="auto">${j.description ? esc(j.description) : '<span class="c">No description saved (dropped before it was fetched).</span>'}</div>`;
+    <div class="desc" dir="auto">${j.description ? esc(j.description) : '<span class="lc">No description saved (dropped before it was fetched).</span>'}</div>`;
   $("drawer").classList.add("open");
   $("drawer").setAttribute("aria-hidden", "false");
 }
 
 function closeDrawer() {
-  $("drawer").classList.remove("open"); $("drawer").setAttribute("aria-hidden", "true");
-  selected = null; render();
+  $("drawer").classList.remove("open");
+  $("drawer").setAttribute("aria-hidden", "true");
+  selected = null;
+  document.querySelectorAll(".card.sel, tr.sel").forEach(e => e.classList.remove("sel"));
 }
 
-$("tabs").addEventListener("click", e => {
-  const b = e.target.closest(".tab"); if (!b) return;
-  tab = b.dataset.k; location.hash = tab; render();
+let toastTimer;
+function toast(msg, undo) {
+  const t = $("toast");
+  t.innerHTML = `<span>${esc(msg)}</span>${undo ? '<button id="undo">Undo</button>' : ""}`;
+  if (undo) $("undo").onclick = () => { t.classList.remove("show"); undo(); };
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 5000);
+}
+
+async function setStatus(id, status) {
+  const r = await fetch(`/api/jobs/${id}/status`, {method: "POST", headers: {"Content-Type": "application/json"},
+                                                   body: JSON.stringify({status})});
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+}
+
+async function move(id, key) {
+  const j = jobs.find(x => x.job_id === id), col = COLUMNS.find(c => c.key === key);
+  if (!j || !j.keep || !col || colOf(j).key === key) return;
+  const prev = j.status;
+  j.status = col.set; render();                 // optimistic
+  try {
+    await setStatus(id, col.set);
+    toast(`Moved to ${col.title}`, async () => {
+      try { await setStatus(id, prev); } catch (e) { toast("Undo failed: " + e.message); }
+      await load(); if (selected === id) openJob(id);
+    });
+  } catch (e) {
+    toast("Couldn't move it: " + e.message);
+  }
+  await load();
+  if (selected === id) openJob(id);
+}
+
+// ---- events
+$("views").addEventListener("click", e => {
+  const b = e.target.closest("button"); if (!b) return;
+  view = b.dataset.v; store.set("view", view); render();
 });
-$("main").addEventListener("click", e => { const r = e.target.closest("tr[data-id]"); if (r) openJob(r.dataset.id); });
-$("dh").addEventListener("click", async e => {
-  const b = e.target.closest("[data-set]"); if (!b) return;
-  await fetch(`/api/jobs/${selected}/status`, {method: "POST", headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({status: b.dataset.set})});
-  const id = selected; await load(); openJob(id);
+$("view").addEventListener("click", e => {
+  const t = e.target.closest("[data-toggle]") || (e.target.closest(".col.collapsed")?.querySelector("[data-toggle]"));
+  if (t) {
+    const k = t.dataset.toggle;
+    collapsed.has(k) ? collapsed.delete(k) : collapsed.add(k);
+    store.set("collapsed", JSON.stringify([...collapsed])); render(); return;
+  }
+  const item = e.target.closest("[data-id]"); if (item) openJob(item.dataset.id);
 });
-["q", "cat", "sort"].forEach(id => $(id).addEventListener("input", render));
+$("view").addEventListener("keydown", e => {
+  const c = e.target.closest(".card"); if (c && e.key === "Enter") openJob(c.dataset.id);
+});
+// drag & drop
+$("view").addEventListener("dragstart", e => {
+  const c = e.target.closest(".card"); if (!c) return;
+  e.dataTransfer.setData("text/plain", c.dataset.id); e.dataTransfer.effectAllowed = "move";
+  c.classList.add("dragging");
+});
+$("view").addEventListener("dragover", e => {
+  const col = e.target.closest(".col"); if (!col) return;
+  e.preventDefault(); e.dataTransfer.dropEffect = "move";
+  document.querySelectorAll(".col.over").forEach(x => x !== col && x.classList.remove("over"));
+  col.classList.add("over");
+});
+$("view").addEventListener("drop", e => {
+  const col = e.target.closest(".col"); if (!col) return;
+  e.preventDefault(); col.classList.remove("over");
+  move(e.dataTransfer.getData("text/plain"), col.dataset.key);
+});
+$("view").addEventListener("dragend", () => {
+  document.querySelectorAll(".col.over, .card.dragging").forEach(x => x.classList.remove("over", "dragging"));
+});
+$("dh").addEventListener("click", e => {
+  const b = e.target.closest("[data-move]"); if (b && selected) move(selected, b.dataset.move);
+});
+["q", "cat", "phase"].forEach(id => $(id).addEventListener("input", render));
 $("close").addEventListener("click", closeDrawer);
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
+document.addEventListener("visibilitychange", () => { if (!document.hidden) load(); });  // fresh data after a scan
 load();
 </script>
 </body>

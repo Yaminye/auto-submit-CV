@@ -46,6 +46,8 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", stream=sys.stdout)
     con = db.connect()
     if "--rescore" in sys.argv:
-        con.execute("UPDATE jobs SET score=NULL WHERE keep=1 AND status IN ('new','queued','review','low')")
+        # only jobs still waiting; jobs you moved by hand on the board keep their place
+        con.execute("UPDATE jobs SET score=NULL WHERE keep=1 AND status IN ('new','queued','review','low') "
+                    "AND COALESCE(apply_note,'') != 'set from dashboard'")
         con.commit()
     score_pending(con, yaml.safe_load((ROOT / "config.yaml").read_text()))

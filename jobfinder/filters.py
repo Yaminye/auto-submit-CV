@@ -58,6 +58,14 @@ def requires_advanced_degree(text: str) -> bool:
     return False
 
 
+def title_excludes(cfg: dict) -> list[str]:
+    """Words that drop a title: always title_exclude, plus senior_title_words if exclude_senior_titles."""
+    words = list(cfg.get("title_exclude") or [])
+    if cfg.get("exclude_senior_titles"):
+        words += cfg.get("senior_title_words") or []
+    return words
+
+
 def title_ok(title: str, excludes: list[str], includes: list[str] | None = None) -> bool:
     t = f" {title.lower()} "
     if any(x.lower() in t for x in excludes):
@@ -67,7 +75,7 @@ def title_ok(title: str, excludes: list[str], includes: list[str] | None = None)
 
 def evaluate(job: dict, cfg: dict) -> tuple[bool, str]:
     """Return (keep, reason)."""
-    if cfg.get("exclude_senior_titles", True) and not title_ok(job["title"], cfg["title_exclude"], cfg.get("title_include")):
+    if not title_ok(job["title"], title_excludes(cfg), cfg.get("title_include")):
         return False, "title"
     if any(c.lower() in job["company"].lower() for c in cfg.get("company_blacklist") or []):
         return False, "blacklist"

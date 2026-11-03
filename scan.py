@@ -38,7 +38,7 @@ def main():
                 job["category"] = category
 
                 # cheap title filter first, skip detail fetch if obviously irrelevant
-                if cfg.get("exclude_senior_titles", True) and not filters.title_ok(job["title"], cfg["title_exclude"], cfg.get("title_include")):
+                if not filters.title_ok(job["title"], filters.title_excludes(cfg), cfg.get("title_include")):
                     db.insert(con, job, False, "title")
                     dropped += 1
                     continue

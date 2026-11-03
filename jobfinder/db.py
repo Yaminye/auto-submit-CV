@@ -33,7 +33,8 @@ EXTRA_COLUMNS = {
     "apply_note": "TEXT",
     "apply_answers": "TEXT",   # JSON: [{label, value, source}] + dry_run flag
 }
-# status: new -> queued (score>=apply) / review (>=review) / low  -> applied / skipped / external / failed
+# status: new -> queued (score>=apply) / review / low -> applied / skipped / external / failed
+#         board stages set by you: assignment / interview1 / interview2 / offer / rejected
 
 
 def connect() -> sqlite3.Connection:

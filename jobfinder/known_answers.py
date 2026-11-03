@@ -73,6 +73,14 @@ def from_profile(field: dict, profile: dict) -> str | None:
                 return _pick(_yes_no(bool(flag)), field)
         return None
 
+    # notice period: a free-text field gets profile.notice_period as-is; a number or a dropdown is a
+    # new question (you answer once, it's saved for next time)
+    if re.search(r"notice period|הודעה מוקדמת", lab):
+        val = profile.get("notice_period")
+        if val and field["kind"] == "text" and field.get("input_type") != "number":
+            return str(val)
+        return None
+
     # plain contact fields
     simple = [
         (r"country code", "phone_country"),

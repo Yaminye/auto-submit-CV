@@ -15,8 +15,12 @@ app = FastAPI(title="auto-submit dashboard")
 LIST_COLS = ("job_id, category, title, company, location, posted, url, years, keep, reason, found_at, "
              "sent_at, status, score, match_reason, applied_at, apply_note, "
              "(apply_answers IS NOT NULL) AS has_answers")
-# statuses you can set by hand from the UI
-MANUAL_STATUSES = {"queued", "review", "low", "skipped"}
+# statuses you can set by hand from the board (drag & drop / job panel)
+#   queued   -> apply.py will try it        applied -> you applied (by apply.py or by hand)
+#   assignment / interview1 / interview2 / offer / rejected -> your own pipeline stages
+#   new / low / external / failed are accepted too, so the board's Undo can restore them
+MANUAL_STATUSES = {"review", "queued", "applied", "assignment", "interview1", "interview2",
+                   "offer", "rejected", "skipped", "new", "low", "external", "failed"}
 
 
 @app.get("/")
