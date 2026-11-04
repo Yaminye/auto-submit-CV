@@ -4,3 +4,5 @@ data/
 logs/
 __pycache__/
 profile.yaml
+# MongoDB extension scratch playgrounds (queries.mongodb.js is the real one)
+playground-*.mongodb.js
