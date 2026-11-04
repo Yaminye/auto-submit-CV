@@ -49,6 +49,19 @@ PAGES = [  # (what, html, expected)
      "site"),
 ]
 
+# New layout's one-page form (copied from the real "Apply to Omnisys" dialog): native <dialog>, no role, no <form>,
+# Email = a select with ONE preselected option, CV list = radios with empty <label>s (name in aria-label), no <legend>
+DIALOG = ('<dialog open data-testid="dialog" aria-labelledby="dialog-header"><header id="dialog-header">'
+          '<h2>Apply to Omnisys</h2></header><button type="button" aria-label="Dismiss"></button>'
+          '<label for="em"><span>Email*</span></label><select id="em" required><option value="me@x.com">me@x.com</option></select>'
+          '<label for="ph"><span>Phone*</span></label><input id="ph" type="tel" required value="+972500000000">'
+          '<div><h3>Resume</h3><p>Select or upload a resume</p></div><fieldset role="radiogroup">'
+          '<input id="r1" type="radio" name="cv" aria-label="My CV.pdf" checked><label for="r1"></label>'
+          '<input id="r2" type="radio" name="cv" aria-label="Old CV.pdf"><label for="r2"></label></fieldset>'
+          '<label for="q"><span>Do you have a bachelor\'s degree?</span></label>'
+          '<select id="q" required><option value="">Select an option</option><option>Yes</option><option>No</option></select>'
+          '<button type="button">Submit application</button></dialog>')
+
 FORM = ('<div role="dialog" class="jobs-easy-apply-modal"><h2>Apply to Omnisys</h2><form>'
         '<label for="ph">Mobile phone number</label><input id="ph" type="tel" required>'
         '<button aria-label="Continue to next step">Next</button></form></div>')
@@ -96,6 +109,21 @@ with sync_playwright() as p:
     page.set_content("<p>job page, no form</p>")
     modal, frame = apply.find_modal(page, timeout=1)
     check("no form -> nothing found", modal is None)
+
+    print("3) the new one-page form (<dialog>)")
+    page.set_content(f"<p>job page</p>{DIALOG}")
+    modal, frame = apply.find_modal(page, timeout=2)
+    check("found (native <dialog open>, no role, no <form>)", modal is not None and frame is page.main_frame)
+    if modal is not None:
+        empty = modal.evaluate(apply.COLLECT_JS, False)
+        check("only the unanswered question is 'empty' (not the pre-filled Email/Phone/CV)",
+              [(f["label"], f["options"]) for f in empty] == [("Do you have a bachelor's degree?", ["Yes", "No"])], empty)
+        every = {f["label"]: f["value"] for f in modal.evaluate(apply.COLLECT_JS, True)}
+        check("one-option Email select counts as filled", every.get("Email*") == "me@x.com", every)
+        cv = next((v for k, v in every.items() if k.startswith("Resume")), None)
+        check("CV list: named from the 'Resume' heading, value from aria-label", cv == "My CV.pdf", every)
+        check("Submit button found (no aria-label, just text)",
+              apply.visible_button(modal, apply.SUBMIT_BTN) is not None)
     browser.close()
 
 print(f"\n{'ALL PASSED' if not failures else f'{len(failures)} FAILED'}")

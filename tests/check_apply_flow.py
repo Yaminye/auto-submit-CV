@@ -56,21 +56,48 @@ def modal(extra=""):
 </body>"""
 
 
-def job_page(button, iframe_html=""):
-    """New layout: random class names, aria-label buttons, the form in a hidden full-screen iframe."""
+def job_page(button, iframe_html="", extra=""):
+    """New layout: random class names, aria-label buttons; the form in a hidden full-screen iframe or in `extra`."""
     iframe = (f'<iframe id="interop" data-testid="interop-iframe" srcdoc="{html.escape(iframe_html)}" style="opacity:0;'
               ' z-index:-1; width:100vw; height:100vh; position:absolute; top:0; border:0"></iframe>'
               if iframe_html else "")
     return f"""<html><body>
 <div class="d7ia2a"><p>MockCo</p><h1>Mock Engineer</h1><p>Tel Aviv · 1 day ago · 12 applicants</p>{button}</div>
 <div><div><h2>About the job</h2></div><div><span data-testid="expandable-text-box">Mock job: Python, Docker.</span></div></div>
-{iframe}
+{iframe}{extra}
 <script>function openApply() {{ const f = document.getElementById('interop');
   f.style.opacity = 1; f.style.zIndex = 10; f.contentDocument.getElementById('m').style.display = 'block'; }}</script>
 </body></html>"""
 
 
 EASY = '<button class="d7ilww" type="button" aria-label="Easy Apply to this job" onclick="openApply()"><span>Easy Apply</span></button>'
+EASY_DIALOG = EASY.replace("openApply()", "dlg.showModal()")
+
+
+def one_page_dialog(on_submit):
+    """The real new form ("Apply to Omnisys", 2026-11-04): native <dialog>, all pre-filled from the LinkedIn
+    profile, CV radios named only by aria-label, Submit right away (no Next)."""
+    return f"""<dialog id="dlg" data-testid="dialog" aria-labelledby="dialog-header">
+ <header id="dialog-header"><h2>Apply to MockCo</h2></header>
+ <button type="button" aria-label="Dismiss" onclick="dlg.close()">x</button>
+ <div id="dbody"><h3>Contact info</h3>
+  <label for="em"><span>Email*</span></label>
+  <select id="em" required><option value="test@example.com">test@example.com</option></select>
+  <label for="cc"><span>Phone country code*</span></label>
+  <select id="cc" required><option value="ad">Andorra (+376)</option><option value="il" selected>Israel (+972)</option></select>
+  <label for="ph"><span>Phone*</span></label><input id="ph" type="tel" required value="+972500000000">
+  <div><h3>Resume</h3><p>Select or upload a resume in DOC, DOCX, or PDF format</p></div>
+  <fieldset role="radiogroup">
+   <input id="r1" type="radio" name="cv" aria-label="mock-cv.pdf" checked><label for="r1"></label>
+   <input id="r2" type="radio" name="cv" aria-label="Old CV.pdf"><label for="r2"></label></fieldset>
+  <button type="button">Upload resume</button>
+  <input id="fol" type="checkbox" checked aria-label="Follow MockCo"><label for="fol"></label>
+  <button type="button" onclick="{on_submit}">Submit application</button></div>
+</dialog>"""
+
+
+SENT = "document.body.dataset.submitted='yes'; dbody.innerHTML='<p>Your application was sent to MockCo</p>'"
+NOTHING = "document.body.dataset.clicked='yes'"       # LinkedIn shows no confirmation
 SITE = ('<a class="d7ii5k" target="_blank" aria-label="Apply on company website" '
         'href="https://www.linkedin.com/safety/go/?url=https%3A%2F%2Fcareers.mockco.example%2Fjob"><span>Apply</span></a>')
 COMPANY = """<html><body><h1>MockCo careers - Backend Engineer</h1>
@@ -92,6 +119,8 @@ PAGES = {
     "https://www.linkedin.com/jobs/view/E1/": job_page(EASY, modal()),
     "https://www.linkedin.com/jobs/view/E2/": job_page(EASY, modal(
         '<label for="color">What is your favorite color?</label><input id="color" type="text" required>')),
+    "https://www.linkedin.com/jobs/view/D1/": job_page(EASY_DIALOG, extra=one_page_dialog(SENT)),
+    "https://www.linkedin.com/jobs/view/D2/": job_page(EASY_DIALOG, extra=one_page_dialog(NOTHING)),
     "https://www.linkedin.com/jobs/view/C1/": job_page(SITE),
     "https://www.linkedin.com/jobs/view/N1/": job_page("<p>Applied Materials · posted 2 days ago</p>"),
     "https://careers.mockco.example/job": COMPANY,
@@ -130,7 +159,7 @@ class Script:
 def job(job_id):
     j = {"_id": job_id, "job_id": job_id, "title": "Mock Engineer", "company": "MockCo", "score": 90,
          "url": f"https://www.linkedin.com/jobs/view/{job_id}/", "match_reason": "mock", "keep": True,
-         "status": "queued", "easy_apply": job_id.startswith("E"), "description": ""}
+         "status": "queued", "easy_apply": job_id[0] in "ED", "description": ""}
     d.jobs.replace_one({"_id": job_id}, j, upsert=True)
     return j
 
@@ -218,6 +247,25 @@ try:
         print("5) job page without an Apply button")
         page, _, (result, _), _ = run("N1", Script())
         check("left in the queue, not 'failed' / not 'applied'", result == "queued", result)
+        page.close()
+
+        print("6) new one-page form (<dialog>), everything pre-filled by LinkedIn")
+        script = Script(("Submit?", "y"))
+        page, _, (result, log), _ = run("D1", script)
+        check("result = applied, LinkedIn confirmed (no 'didn't confirm' question)",
+              result == "applied" and not any("didn't confirm" in pr for pr in script.prompts), script.prompts)
+        check("touched nothing pre-filled: no Fill / new-question prompts, empty answer log",
+              not any(pr.startswith(("? Fill", "Done?")) for pr in script.prompts) and log == [], (script.prompts, log))
+        check("Submit clicked", page.evaluate("document.body.dataset.submitted") == "yes")
+        page.close()
+
+        print("7) Submit clicked but LinkedIn shows no confirmation -> asks you; n = stays in the queue")
+        apply.SENT_TIMEOUT = 1
+        script = Script(("Submit?", "y"), ("didn't confirm", "n"))
+        page, _, (result, _), _ = run("D2", script)
+        check("asked you instead of assuming", any("didn't confirm" in pr for pr in script.prompts), script.prompts)
+        check("result = queued (not 'applied')", result == "queued", result)
+        check("Submit was clicked", page.evaluate("document.body.dataset.clicked") == "yes")
         page.close()
         browser.close()
 finally:

@@ -45,14 +45,19 @@ APPLY_BTN = ("button[aria-label*='Easy Apply' i], a[aria-label*='Easy Apply' i],
              "button.jobs-apply-button, a.jobs-apply-button")
 # The WHOLE element must read like "Applied 3 days ago": a loose /Applied .* ago/ matched
 # "Applied Materials ... 2 days ago" and "...or Applied AI" in a description.
-APPLIED_TEXT = re.compile(r"^Applied (\d+|an?) (second|minute|hour|day|week|month|year)s? ago$", re.I)
+APPLIED_TEXT = re.compile(r"^Applied (just now|now|(\d+|an?) (second|minute|hour|day|week|month|year)s? ago)$", re.I)
+# after clicking Submit we wait for LinkedIn to say so (never assume it went through)
+SENT_TEXT = re.compile(r"application (was )?sent|application submitted|הבקשה (שלך )?נשלחה|מועמדות(ך)? נשלחה", re.I)
+SENT_TIMEOUT = 15
 CLOSED_TEXT = re.compile(r"No longer accepting applications", re.I)
 CONTINUE_BTN = "div[role=dialog] button:has-text('Continue'), div[role=dialog] a:has-text('Continue')"
 VISIBLE_FIELDS = "input:not([type=hidden]):not([type=file]):visible, select:visible, textarea:visible"
 SITE_APPLY = re.compile(r"^\s*(apply|apply now|apply for this (job|position|role)|הגש(ת)? מועמדות)\s*$", re.I)
-# most specific first; the new layout may draw it inside its hidden "interop" iframe -> find_modal looks in all frames
-MODALS = ["div.jobs-easy-apply-modal", "[data-test-modal][role='dialog']",
-          "[role='dialog']:has(form)", "[role='dialog']:has-text('Apply to')"]
+# most specific first. New layout: a native <dialog open> ("Apply to Omnisys"), no role attribute, no <form>.
+# find_modal also looks inside iframes.
+MODALS = ["div.jobs-easy-apply-modal", "dialog[open]:has-text('Apply to')", "[data-test-modal][role='dialog']",
+          "[role='dialog']:has(form)", "[role='dialog']:has-text('Apply to')",
+          "dialog[open]:has(select, textarea, input:not([type=hidden]))"]
 SUBMIT_BTN = ("button[aria-label='Submit application'], button:has-text('Submit application'), "
               "button[data-live-test-easy-apply-submit-button]")
 REVIEW_BTN = ("button[aria-label='Review your application'], button:has-text('Review'), "
@@ -61,7 +66,7 @@ NEXT_BTN = ("button[aria-label='Continue to next step'], button:has-text('Next')
             "button[data-easy-apply-next-button], button[data-live-test-easy-apply-next-button]")
 DISMISS_BTN = "button[aria-label='Dismiss'], button.artdeco-modal__dismiss"
 DISCARD_BTN = "button[data-control-name='discard_application_confirm_btn'], button:has-text('Discard')"
-FIELD_ERROR = ".artdeco-inline-feedback--error"
+FIELD_ERROR = ".artdeco-inline-feedback--error, [aria-invalid='true']"
 # old layout ids/classes; new layout: first text box on the page is "About the job" (second = "About the company")
 JOB_DESCRIPTION = ("#job-details, div.jobs-description__content, div.jobs-description-content__text, "
                    "[data-testid='expandable-text-box']")
@@ -81,10 +86,26 @@ COLLECT_JS = r"""
                       .replace(/\s+/g, ' ').trim());
   const visible = el => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const labelOf = el => {
-    if (el.id) { const l = root.querySelector(`label[for="${CSS.escape(el.id)}"]`); if (l) return clean(l.innerText); }
+    if (el.id) { const l = root.querySelector(`label[for="${CSS.escape(el.id)}"]`); const t = l && clean(l.innerText); if (t) return t; }
     const fs = el.closest('fieldset'); if (fs && fs.querySelector('legend')) return clean(fs.querySelector('legend').innerText);
     return clean(el.getAttribute('aria-label') || el.placeholder || '');
   };
+  const near = el => {  // text just before el ("Resume" heading) - for groups without a <legend>
+    for (let n = el, up = 0; n && up < 3; n = n.parentElement, up++)
+      for (let s = n.previousElementSibling; s; s = s.previousElementSibling) {
+        const t = clean(s.innerText); if (t) return t.slice(0, 150);
+      }
+    return '';
+  };
+  const groupLabel = fs => {
+    const lg = fs.querySelector('legend'); if (lg && clean(lg.innerText)) return clean(lg.innerText);
+    if (fs.getAttribute('aria-label')) return clean(fs.getAttribute('aria-label'));
+    const by = (fs.getAttribute('aria-labelledby') || '').split(/\s+/).filter(Boolean);
+    const t = clean(by.map(id => (document.getElementById(id) || {}).innerText || '').join(' '));
+    return t || near(fs);
+  };
+  // new layout: a select's first option can be a real value (Email: one option, preselected)
+  const placeholder = o => !o || o.value === '' || !o.text.trim() || /^[-\s]*(select|choose|בחר)\b/i.test(o.text.trim());
   const req = el => el.required || el.getAttribute('aria-required') === 'true';
   const tag = el => { const id = nextId(); el.setAttribute('data-as-id', id); return id; };
 
@@ -98,21 +119,22 @@ COLLECT_JS = r"""
     });
   root.querySelectorAll('select').forEach(el => {
     if (!visible(el)) return;
-    const cur = el.options[el.selectedIndex];
-    const value = (cur && el.selectedIndex > 0 && !/select an option/i.test(cur.text)) ? cur.text.trim() : '';
+    const cur = el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+    const value = placeholder(cur) ? '' : cur.text.trim();
     if (value && !all) return;
-    const opts = [...el.options].map(o => o.text.trim()).filter(t => t && !/^select an option$/i.test(t));
+    const opts = [...el.options].filter(o => !placeholder(o)).map(o => o.text.trim());
     out.push({id: tag(el), kind: 'select', label: labelOf(el), options: opts, required: req(el), value});
   });
   root.querySelectorAll('fieldset').forEach(fs => {
     const radios = [...fs.querySelectorAll('input[type=radio]')];
     if (!radios.length) return;
-    const text = r => { const l = r.id && fs.querySelector(`label[for="${CSS.escape(r.id)}"]`); return clean(l ? l.innerText : r.value); };
+    // new layout: the CV list has empty <label>s, the file name is in aria-label
+    const text = r => { const l = r.id && fs.querySelector(`label[for="${CSS.escape(r.id)}"]`);
+                        return (l && clean(l.innerText)) || clean(r.getAttribute('aria-label') || r.value); };
     const checked = radios.find(r => r.checked);
     const value = checked ? text(checked) : '';
     if (value && !all) return;
-    out.push({id: tag(fs), kind: 'radio', label: clean(fs.querySelector('legend')?.innerText),
-              options: radios.map(text), required: true, value});
+    out.push({id: tag(fs), kind: 'radio', label: groupLabel(fs), options: radios.map(text), required: true, value});
   });
   return out;
 }
@@ -123,7 +145,7 @@ CLICK_RADIO_JS = r"""
   const norm = t => (t || '').replace(/\s+/g, ' ').trim().toLowerCase();
   for (const r of fs.querySelectorAll('input[type=radio]')) {
     const l = r.id && fs.querySelector(`label[for="${CSS.escape(r.id)}"]`);
-    const txt = norm(l ? l.innerText : r.value);
+    const txt = norm((l && norm(l.innerText)) || r.getAttribute('aria-label') || r.value);
     if (txt === norm(value) || txt.startsWith(norm(value))) { (l || r).click(); return true; }
   }
   return false;
@@ -260,6 +282,29 @@ def find_modal(page: Page, timeout: float = 12) -> tuple:
         if time.time() >= deadline:
             return None, None
         time.sleep(0.5)
+
+
+def sent_marks(page: Page) -> int:
+    """How many "application sent" / "Applied now" texts the page (and its iframes) SHOW right now
+    (visible only: a hidden "sent" message that appears later must count as new)."""
+    n = 0
+    for fr in page.frames:
+        try:
+            for loc in (fr.get_by_text(SENT_TEXT), fr.get_by_text(APPLIED_TEXT)):
+                n += sum(1 for i in range(loc.count()) if loc.nth(i).is_visible())
+        except Exception:   # frames come and go
+            continue
+    return n
+
+
+def wait_sent(page: Page, before: int) -> bool:
+    """True once LinkedIn shows a NEW "sent" text (more than `before`, counted before clicking Submit)."""
+    deadline = time.time() + SENT_TIMEOUT
+    while time.time() < deadline:
+        if sent_marks(page) > before:
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def save_description(con, page: Page, job: dict) -> None:
@@ -473,6 +518,9 @@ def discard(frame) -> None:
 
 
 def print_log(log: list) -> None:
+    if not log:
+        print("   Answers: none needed - every field was already filled (by LinkedIn / the site)")
+        return
     print("   Answers:")
     for e in log:
         print(f"     {e['label'][:65]:65} = {e['value'][:40]:40} ({e['source']})")
@@ -559,13 +607,22 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             if a != "y":
                 discard(frame)
                 return ("quit" if a == "q" else "skipped"), log
+            before = sent_marks(page)
             click_first_visible(modal, SUBMIT_BTN)
-            pause(2.5, 4)
+            if not wait_sent(page, before):
+                snap(page, "submit-not-confirmed")
+                a = ask("   Clicked Submit, but LinkedIn didn't confirm it. Look in the browser - was it sent?\n"
+                        "   [y]es / [n]o (leave it in the queue):", "yn")
+                if a == "n":
+                    print("   not sent - left in the queue (the form is still open in the browser)")
+                    return "queued", log
+            else:
+                print("   ✔ submitted - LinkedIn confirmed")
+            snap(page, "submitted")
             try:  # close the "application sent" dialog
                 frame.locator(DISMISS_BTN).first.click(timeout=4000)
             except PWTimeout:
                 pass
-            print("   ✔ submitted")
             return "applied", log
 
         nxt = visible_button(modal, REVIEW_BTN) or visible_button(modal, NEXT_BTN)
