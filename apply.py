@@ -1,12 +1,13 @@
-"""Semi-auto LinkedIn Easy Apply.
+"""Semi-auto apply: LinkedIn Easy Apply + company sites.
 
 Opens a real Chrome (own profile in data/chrome-profile - log in once) and goes through jobs with
-status='queued' (score >= apply_threshold). For each Easy Apply form step:
-  - uploads the CV if it's missing
-  - fills ONLY known answers: profile.yaml + answers you gave before (MongoDB `answers`)
-  - a NEW question -> stops, you answer it in the browser, and your answer is saved for next time
-  - stops before "Submit application" so you approve every application
-The description and the answers sent are saved to the DB (see dashboard.py).
+status='queued' (score >= apply_threshold), highest score first.
+  Easy Apply    - fills each step, stops before "Submit application" for your y/s/q.
+  Company site  - clicks Apply on LinkedIn, opens the company's form, uploads the CV and fills what it
+                  knows. YOU check it, solve any CAPTCHA and click the site's Submit, then press d.
+Both: fills ONLY known answers (profile.yaml + answers you gave before, MongoDB `answers`); a NEW question
+-> it stops, you answer it in the browser, and your answer is saved for next time.
+The description and the answers used are saved to the DB (see the board).
 
   .venv/bin/python apply.py              # normal run
   .venv/bin/python apply.py --dry-run    # fill forms, never submit (discards at the end)
@@ -16,6 +17,7 @@ The description and the answers sent are saved to the DB (see dashboard.py).
 import argparse
 import os
 import random
+import re
 import sys
 import time
 from pathlib import Path
@@ -32,7 +34,10 @@ load_dotenv(ROOT / ".env")
 
 PROFILE_DIR = ROOT / "data" / "chrome-profile"
 
-EASY_APPLY_BTN = "button.jobs-apply-button:has-text('Easy Apply'), button[aria-label*='Easy Apply']"
+APPLY_BTN = "button.jobs-apply-button, a.jobs-apply-button"     # Easy Apply and company-site Apply share it
+CONTINUE_BTN = "div[role=dialog] button:has-text('Continue'), div[role=dialog] a:has-text('Continue')"
+VISIBLE_FIELDS = "input:not([type=hidden]):not([type=file]):visible, select:visible, textarea:visible"
+SITE_APPLY = re.compile(r"^\s*(apply|apply now|apply for this (job|position|role)|הגש(ת)? מועמדות)\s*$", re.I)
 MODAL = "div.jobs-easy-apply-modal, div[data-test-modal][role='dialog'], div[role='dialog']:has(form)"
 SUBMIT_BTN = "button[aria-label='Submit application'], button:has-text('Submit application')"
 REVIEW_BTN = "button[aria-label='Review your application'], button:has-text('Review')"
@@ -175,40 +180,135 @@ def fill_field(modal, page: Page, f: dict, value: str) -> bool:
         return False
 
 
-def fill_step(modal, page: Page, con, profile: dict, cache: dict, log: list) -> str:
-    """Fill known answers; stop on new required questions. Returns 'ok' / 'skip' / 'quit'."""
-    fields = modal.evaluate(COLLECT_JS, False)
+def fill_known(root, page_like, profile: dict, cache: dict, log: list) -> list[dict]:
+    """Fill every empty field we have an answer for; return the ones we don't (new questions)."""
     new = []
-    for f in fields:
+    for f in root.evaluate(COLLECT_JS, False):
         hit = lookup(f, profile, cache)
-        if hit and fill_field(modal, page, f, hit[0]):
+        if hit and fill_field(root, page_like, f, hit[0]):
             log.append({"label": f["label"], "value": hit[0], "source": hit[1]})
         else:
             new.append(f)
     pause()
+    return new
 
-    if not any(f["required"] for f in new):
-        for f in new:
+
+def ask_new(pairs: list, con, cache: dict, log: list, prompt: str) -> str:
+    """pairs = [(root, field)]. Stops only for required new questions; saves what you type.
+    Returns 'ok' / 'skip' / 'quit'."""
+    if not any(f["required"] for _, f in pairs):
+        for _, f in pairs:
             log.append({"label": f["label"], "value": "", "source": "left empty (optional)"})
         return "ok"
 
     print("   NEW questions - answer them in the browser:")
-    for f in new:
+    for _, f in pairs:
         opts = f"  options: {', '.join(f['options'])}" if f.get("options") else ""
         print(f"     • {f['label']}{' (required)' if f['required'] else ''}{opts}")
-    a = ask("   Done? [c]ontinue / [s]kip job / [q]uit:", "csq")
+    a = ask(prompt, "csq")
     if a != "c":
         return "skip" if a == "s" else "quit"
 
     # read back what you typed and remember it
-    now = {norm(f["label"]): f["value"] for f in modal.evaluate(COLLECT_JS, True)}
-    for f in new:
+    now = {}
+    for root in {id(r): r for r, _ in pairs}.values():
+        now.update({norm(x["label"]): x["value"] for x in root.evaluate(COLLECT_JS, True)})
+    for _, f in pairs:
         value = now.get(norm(f["label"]), "")
         log.append({"label": f["label"], "value": value, "source": "you"})
         if value:
             cache[norm(f["label"])] = value
             db.save_answer(con, norm(f["label"]), f["label"], value)
     return "ok"
+
+
+def fill_step(modal, page: Page, con, profile: dict, cache: dict, log: list) -> str:
+    """One Easy Apply step: fill known answers, stop on new required questions."""
+    new = fill_known(modal, page, profile, cache, log)
+    return ask_new([(modal, f) for f in new], con, cache, log, "   Done? [c]ontinue / [s]kip job / [q]uit:")
+
+
+# ---------------------------------------------------------------- company sites
+
+def open_company_site(page: Page) -> Page | None:
+    """Click LinkedIn's (non Easy Apply) Apply button; return the company's page (new tab or same tab)."""
+    btn = page.locator(APPLY_BTN).first
+    try:
+        with page.context.expect_page(timeout=8000) as info:
+            btn.click()
+        site = info.value
+    except PWTimeout:
+        site = page
+        cont = page.locator(CONTINUE_BTN).first        # LinkedIn sometimes asks first
+        if cont.count() and cont.is_visible():
+            try:
+                with page.context.expect_page(timeout=8000) as info:
+                    cont.click()
+                site = info.value
+            except PWTimeout:
+                pass
+    try:
+        site.wait_for_load_state("domcontentloaded", timeout=20000)
+    except PWTimeout:
+        pass
+    return None if "linkedin.com" in site.url else site
+
+
+def form_roots(site: Page) -> list:
+    """[(form root, frame)] for every frame with an application-looking form (forms are often in an iframe)."""
+    roots = []
+    for fr in site.frames:
+        try:
+            best, best_n = fr.locator("body"), 0
+            forms = fr.locator("form")
+            for i in range(min(forms.count(), 10)):      # the biggest form, not the newsletter box
+                n = forms.nth(i).locator(VISIBLE_FIELDS).count()
+                if n > best_n:
+                    best, best_n = forms.nth(i), n
+            if best_n == 0:
+                best_n = fr.locator(VISIBLE_FIELDS).count()
+            if best_n >= 2:
+                roots.append((best, fr))
+        except Exception:   # frames come and go (ads, captcha); ignore the ones we can't read
+            continue
+    return roots
+
+
+def company_apply(site: Page, con, cfg: dict, profile: dict, cache: dict, dry_run: bool) -> tuple[str, list]:
+    log: list = []
+    print(f"   company site: {site.url[:90]}")
+    pause(2.5, 4)
+    roots = form_roots(site)
+    if not roots:   # the form is often behind the site's own "Apply" button
+        btn = site.get_by_role("link", name=SITE_APPLY).or_(site.get_by_role("button", name=SITE_APPLY)).first
+        try:
+            btn.click(timeout=5000)
+            pause(2.5, 4)
+        except PWTimeout:
+            pass
+        roots = form_roots(site)
+    if not roots:
+        a = ask("   Can't find the application form. Open it in the browser, then [c]ontinue / [s]kip / [q]uit:", "csq")
+        if a != "c":
+            return ("quit" if a == "q" else "skipped"), log
+        roots = form_roots(site)
+
+    pairs = []
+    for root, frame in roots:
+        upload_resume_if_needed(root, cfg["cv_path"])
+        pairs += [(root, f) for f in fill_known(root, frame, profile, cache, log)]
+    step = ask_new(pairs, con, cache, log,
+                   "   Fill them in the browser (don't submit yet), then [c]ontinue / [s]kip / [q]uit:")
+    if step != "ok":
+        return ("quit" if step == "quit" else "skipped"), log
+
+    print_log(log)
+    if dry_run:
+        print("   [dry-run] company form filled - nothing submitted")
+        return "skipped", log
+    a = ask("   Check the form in the browser, solve any CAPTCHA and click the site's Submit yourself.\n"
+            "   Then: [d]one, I applied / [l]ater (keep in queue) / [s]kip / [q]uit:", "dlsq")
+    return {"d": "applied", "l": "queued", "s": "skipped", "q": "quit"}[a], log
 
 
 def click_first_visible(modal, selector: str) -> bool:
@@ -237,19 +337,43 @@ def print_log(log: list) -> None:
 
 
 def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict, dry_run: bool) -> tuple[str, list]:
-    """Returns (result, answers log). result: applied / skipped / external / failed / quit"""
+    """Returns (result, answers log). result: applied / queued (later) / skipped / external / failed / quit"""
     print(f"\n=== [{job['score']}] {job['title']} @ {job['company']}\n    {job['url']}\n    {job['match_reason']}")
     page.goto(job["url"], wait_until="domcontentloaded")
     pause(2.5, 4.5)
     save_description(con, page, job)
 
-    btn = page.locator(EASY_APPLY_BTN).first
+    btn = page.locator(APPLY_BTN).first
     if btn.count() == 0 or not btn.is_visible():
         if page.locator("text=/Applied .* ago/").count():
             print("   already applied")
             return "applied", []
-        print("   no Easy Apply (external site) - skipping")
-        return "external", []
+        if page.locator("text=/No longer accepting applications/i").count():
+            print("   job closed - skipping")
+            return "skipped", []
+        print("   no Apply button found")
+        return "failed", []
+
+    if "easy apply" not in (btn.inner_text() or "").lower():
+        if cfg.get("easy_apply_only"):
+            print("   company site - skipped (easy_apply_only: true)")
+            return "external", []
+        site = open_company_site(page)
+        if site is None:
+            a = ask("   Couldn't open the company site. Open its application page in the browser, "
+                    "then [c]ontinue / [s]kip / [q]uit:", "csq")
+            if a != "c":
+                return ("quit" if a == "q" else "skipped"), []
+            site = next((pg for pg in reversed(page.context.pages) if "linkedin.com" not in pg.url), None)
+            if site is None:
+                return "failed", []
+        try:
+            return company_apply(site, con, cfg, profile, cache, dry_run)
+        finally:
+            if site is not page:
+                pause(1.5, 2.5)
+                site.close()
+
     btn.click()
     try:
         page.locator(MODAL).first.wait_for(state="visible", timeout=10000)

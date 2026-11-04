@@ -303,7 +303,7 @@ function card(j) {
     ? `<span class="b ${scoreClass(j.score)}" title="Claude match score">${j.score}</span>`
     : `<span class="b b-dim">not scored</span>`);
   if (isNew(j)) badges.push('<span class="b b-new">NEW</span>');
-  if (j.status === "external") badges.push('<span class="b b-ext" title="No Easy Apply - apply on the company site, then drag it to Applied">company site</span>');
+  if (j.easy_apply === false || j.status === "external") badges.push('<span class="b b-ext" title="Applies on the company site: apply.py opens it and fills what it knows, you click Submit">company site</span>');
   if (j.status === "failed") badges.push('<span class="b b-fail" title="apply.py could not finish - apply by hand">auto-apply failed</span>');
   const applied = LATER.includes(j.status) && j.applied_at;
   const when = applied ? ago(j.applied_at) : ago(j.found_at);
@@ -384,7 +384,7 @@ async function openJob(id) {
       <div><span>Found</span>${day(j.found_at)}</div>
       <div><span>Applied</span>${j.applied_at ? day(j.applied_at) : "–"}</div>
     </div>
-    ${j.status === "external" ? '<div class="reason">No Easy Apply on LinkedIn — apply on the company site, then move it to <b>Applied</b>.</div>' : ""}
+    ${j.easy_apply === false || j.status === "external" ? '<div class="reason">Applies on the company site. apply.py opens it and fills what it knows — you check the form and click Submit there. Applied by hand? Move it to <b>Applied</b>.</div>' : ""}
     ${j.status === "failed" ? '<div class="reason">apply.py couldn\'t finish this one — apply by hand, then move it to <b>Applied</b>.</div>' : ""}
     ${j.match_reason ? `<h3>Why this score</h3><div class="reason">${esc(j.match_reason)}</div>` : ""}
     ${ans ? `<h3>Answers ${ans.dry_run ? "(dry run – not sent)" : "sent"} · ${esc(day(ans.at))}</h3>

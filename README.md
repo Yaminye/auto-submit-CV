@@ -5,8 +5,8 @@ puts it on a local job board, and applies (semi-auto) to the good matches via Ea
 
 - Uses LinkedIn's public (guest) job search for finding jobs, so no login and no account risk
 - Only jobs posted in the last 48h; categories Backend, Full Stack, AI Engineer, Data Science, DevOps
-- Only LinkedIn **Easy Apply** jobs (`easy_apply_only: true`): the search asks LinkedIn for Easy Apply jobs only,
-  and every job page is checked too. Set it to `false` to also see jobs that apply on the company site
+- Easy Apply **and** company-site jobs (`easy_apply_only: false`). Set it to `true` for Easy Apply only: the search
+  then asks LinkedIn for Easy Apply jobs and every job page is checked too
 - Drops jobs asking for > 4 years (minimum of the range), management titles, and Data Science jobs where an
   MSc/PhD is required. Senior titles are kept (`exclude_senior_titles: false`) - the years filter decides
 - Never processes the same job twice
@@ -74,6 +74,11 @@ Claude scores every kept job against your CV (0-100): **≥ 70** → To apply, *
 .venv/bin/python apply.py              # fills known answers, stops on new questions + before Submit
 .venv/bin/python apply.py --job 4486487512
 ```
+- **Easy Apply**: fills every step and stops before "Submit application" - you press `y`.
+- **Company site** (Comeet, Greenhouse, Lever, ...): clicks Apply on LinkedIn, opens the company's form (also inside
+  iframes), uploads the CV and fills what it knows. **You** check it, solve any CAPTCHA and click the site's Submit,
+  then press `d` (or `l` = later, keeps it in the queue). Sites that need an account (Workday) you do by hand.
+
 Form filling never guesses: it fills only from `profile.yaml` and answers you gave before. A new required
 question → it stops, you answer in the browser, press `c`, and your answer is saved. Max 20 applications/day.
 

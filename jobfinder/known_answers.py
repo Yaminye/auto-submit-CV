@@ -4,7 +4,8 @@ import re
 
 
 def norm(label: str) -> str:
-    return re.sub(r"\s+", " ", label or "").strip().lower()
+    """Question key: lower-case, single spaces, without the required-marker ("Email *", "Phone:")."""
+    return re.sub(r"\s+", " ", label or "").strip().rstrip(" *:").strip().lower()
 
 
 def _pick(value: str, field: dict) -> str | None:
@@ -45,7 +46,7 @@ def skill_years(label: str, profile: dict) -> str | None:
 
 
 def from_profile(field: dict, profile: dict) -> str | None:
-    lab = norm(field["label"])
+    lab = norm(field["label"]).rstrip(" *:")      # company sites mark required fields "Name *"
     is_yes_no = field["kind"] in ("select", "radio") and any(
         o.strip().lower() in ("yes", "no", "כן", "לא") for o in field.get("options", []))
 
@@ -81,6 +82,15 @@ def from_profile(field: dict, profile: dict) -> str | None:
             return str(val)
         return None
 
+    # company-site forms: full name, current job
+    if re.fullmatch(r"(full |your )?name|שם מלא", lab):
+        full = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+        return full or None
+    if re.search(r"current (company|employer)|חברה נוכחית", lab):
+        return _pick(str(profile["current_company"]), field) if profile.get("current_company") else None
+    if re.search(r"current (job )?(title|position|role)", lab):
+        return _pick(str(profile["current_title"]), field) if profile.get("current_title") else None
+
     # plain contact fields
     simple = [
         (r"country code", "phone_country"),
@@ -91,7 +101,7 @@ def from_profile(field: dict, profile: dict) -> str | None:
         (r"linkedin", "linkedin_url"),
         (r"github", "github_url"),
         (r"website|portfolio", "website"),
-        (r"\bcity\b|location \(city\)", "city"),
+        (r"\bcity\b|^location( \(city\))?$|עיר מגורים", "city"),
     ]
     for rx, key in simple:
         if re.search(rx, lab):

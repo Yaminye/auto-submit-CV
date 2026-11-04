@@ -1,8 +1,8 @@
 """Re-run the filters after changing config.yaml / filters.py.
 
   .venv/bin/python recheck.py            # re-check kept jobs that are still waiting (new/queued/review/low)
-  .venv/bin/python recheck.py --dropped  # re-check jobs dropped by the TITLE filter (e.g. after
-                                         # turning exclude_senior_titles off) - fetches their description
+  .venv/bin/python recheck.py --dropped  # re-check jobs dropped by a config rule: the title filter or
+                                         # easy_apply_only (e.g. after turning one of them off)
 
 Jobs you moved forward (applied / interview / offer / ...) are never touched.
 New keeps get scored by Claude at the end (if ANTHROPIC_API_KEY is set).
@@ -51,20 +51,25 @@ def recheck_kept(con, cfg) -> None:
 
 
 def recheck_dropped(con, cfg) -> None:
-    rows = db.find_jobs(con, {"keep": False, "reason": "title"})
+    rows = db.find_jobs(con, {"keep": False, "reason": {"$in": ["title", "not Easy Apply"]}})
     candidates = [j for j in rows
                   if filters.title_ok(j["title"], filters.title_excludes(cfg), cfg.get("title_include"))]
-    print(f"{len(rows)} title-dropped jobs, {len(candidates)} pass the title filter now")
+    print(f"{len(rows)} jobs dropped by a config rule, {len(candidates)} pass the title filter now")
     kept = 0
     for job in candidates:
-        job.update(linkedin.details(job["job_id"]))
+        fetch = not job.get("description")          # title-dropped jobs were never fetched
+        if fetch:
+            job.update(linkedin.details(job["job_id"]))
         keep, reason = filters.evaluate(job, cfg)
         update(con, job, keep, reason)
         if keep:
             kept += 1
-            db.update_job(con, job["job_id"], {"status": "new", "score": None})
-            print(f"  + {job['title']} @ {job['company']} (yrs={job.get('years')})")
-        linkedin._pause(1.0, 2.5)
+            if job.get("score") is None:              # never scored -> score at the end
+                db.update_job(con, job["job_id"], {"status": "new"})
+            print(f"  + [{job.get('score') if job.get('score') is not None else 'new'}] "
+                  f"{job['title']} @ {job['company']} ({job.get('status')})")
+        if fetch:
+            linkedin._pause(1.0, 2.5)
     print(f"now kept: {kept} of {len(candidates)}")
 
 
