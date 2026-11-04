@@ -12,7 +12,7 @@ load_dotenv(ROOT / ".env")
 
 def main():
     con = db.connect()
-    jobs = [dict(r) for r in db.unsent(con)]
+    jobs = db.unsent(con)
     if "--preview" in sys.argv:
         out = ROOT / "data" / "preview.html"
         out.write_text(notify.build_html(jobs), encoding="utf-8")

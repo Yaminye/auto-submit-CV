@@ -21,18 +21,17 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 for _n in ("httpx", "httpx2"):
     logging.getLogger(_n).setLevel(logging.WARNING)
-WAITING = ("new", "queued", "review", "low")
 
 
 def update(con, job: dict, keep: bool, reason: str) -> None:
-    con.execute("UPDATE jobs SET keep=?, reason=?, years=?, description=COALESCE(?, description) WHERE job_id=?",
-                (int(keep), reason, job.get("years"), job.get("description") if keep else None, job["job_id"]))
-    con.commit()
+    fields = {"keep": keep, "reason": reason, "years": job.get("years")}
+    if keep and job.get("description"):
+        fields["description"] = job["description"]
+    db.update_job(con, job["job_id"], fields)
 
 
 def recheck_kept(con, cfg) -> None:
-    rows = [dict(r) for r in con.execute(
-        f"SELECT * FROM jobs WHERE keep=1 AND status IN ({','.join('?' * len(WAITING))})", WAITING)]
+    rows = db.find_jobs(con, {"keep": True, "status": {"$in": db.WAITING}})
     dropped = 0
     for job in rows:
         if not filters.title_ok(job["title"], filters.title_excludes(cfg), cfg.get("title_include")):
@@ -50,7 +49,7 @@ def recheck_kept(con, cfg) -> None:
 
 
 def recheck_dropped(con, cfg) -> None:
-    rows = [dict(r) for r in con.execute("SELECT * FROM jobs WHERE keep=0 AND reason='title'")]
+    rows = db.find_jobs(con, {"keep": False, "reason": "title"})
     candidates = [j for j in rows
                   if filters.title_ok(j["title"], filters.title_excludes(cfg), cfg.get("title_include"))]
     print(f"{len(rows)} title-dropped jobs, {len(candidates)} pass the title filter now")
@@ -61,8 +60,7 @@ def recheck_dropped(con, cfg) -> None:
         update(con, job, keep, reason)
         if keep:
             kept += 1
-            con.execute("UPDATE jobs SET status='new', score=NULL WHERE job_id=?", (job["job_id"],))
-            con.commit()
+            db.update_job(con, job["job_id"], {"status": "new", "score": None})
             print(f"  + {job['title']} @ {job['company']} (yrs={job.get('years')})")
         linkedin._pause(1.0, 2.5)
     print(f"now kept: {kept} of {len(candidates)}")

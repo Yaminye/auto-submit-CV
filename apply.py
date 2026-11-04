@@ -3,7 +3,7 @@
 Opens a real Chrome (own profile in data/chrome-profile - log in once) and goes through jobs with
 status='queued' (score >= apply_threshold). For each Easy Apply form step:
   - uploads the CV if it's missing
-  - fills ONLY known answers: profile.yaml + answers you approved before (data/answers.json)
+  - fills ONLY known answers: profile.yaml + answers you gave before (MongoDB `answers`)
   - a NEW question -> stops, you answer it in the browser, and your answer is saved for next time
   - stops before "Submit application" so you approve every application
 The description and the answers sent are saved to the DB (see dashboard.py).
@@ -14,7 +14,6 @@ The description and the answers sent are saved to the DB (see dashboard.py).
   .venv/bin/python apply.py --login      # just open the browser to log in
 """
 import argparse
-import json
 import os
 import random
 import sys
@@ -32,7 +31,6 @@ ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
 
 PROFILE_DIR = ROOT / "data" / "chrome-profile"
-ANSWER_CACHE = ROOT / "data" / "answers.json"
 
 EASY_APPLY_BTN = "button.jobs-apply-button:has-text('Easy Apply'), button[aria-label*='Easy Apply']"
 MODAL = "div.jobs-easy-apply-modal, div[data-test-modal][role='dialog'], div[role='dialog']:has(form)"
@@ -111,17 +109,6 @@ def pause(a=0.8, b=2.2):
     time.sleep(random.uniform(a, b))
 
 
-def load_cache() -> dict:
-    try:
-        return json.loads(ANSWER_CACHE.read_text())
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-
-def save_cache(cache: dict) -> None:
-    ANSWER_CACHE.write_text(json.dumps(cache, ensure_ascii=False, indent=1, sort_keys=True))
-
-
 def ask(prompt: str, choices: str) -> str:
     while True:
         a = input(f"{prompt} ").strip().lower()
@@ -147,8 +134,7 @@ def save_description(con, page: Page, job: dict) -> None:
     except PWTimeout:
         return
     if len(text) > len(job.get("description") or ""):
-        con.execute("UPDATE jobs SET description=? WHERE job_id=?", (text, job["job_id"]))
-        con.commit()
+        db.update_job(con, job["job_id"], {"description": text})
 
 
 def upload_resume_if_needed(modal, cv_path: str) -> None:
@@ -189,7 +175,7 @@ def fill_field(modal, page: Page, f: dict, value: str) -> bool:
         return False
 
 
-def fill_step(modal, page: Page, profile: dict, cache: dict, log: list) -> str:
+def fill_step(modal, page: Page, con, profile: dict, cache: dict, log: list) -> str:
     """Fill known answers; stop on new required questions. Returns 'ok' / 'skip' / 'quit'."""
     fields = modal.evaluate(COLLECT_JS, False)
     new = []
@@ -221,7 +207,7 @@ def fill_step(modal, page: Page, profile: dict, cache: dict, log: list) -> str:
         log.append({"label": f["label"], "value": value, "source": "you"})
         if value:
             cache[norm(f["label"])] = value
-    save_cache(cache)
+            db.save_answer(con, norm(f["label"]), f["label"], value)
     return "ok"
 
 
@@ -275,7 +261,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
     for _ in range(15):
         pause(1.2, 2.0)
         upload_resume_if_needed(modal, cfg["cv_path"])
-        step = fill_step(modal, page, profile, cache, log)
+        step = fill_step(modal, page, con, profile, cache, log)
         if step != "ok":
             discard(page)
             return ("quit" if step == "quit" else "skipped"), log
@@ -334,16 +320,16 @@ def main():
 
     con = db.connect()
     if args.job:
-        jobs = [dict(r) for r in con.execute("SELECT * FROM jobs WHERE job_id=?", (args.job,))]
+        jobs = [j for j in [db.get_job(con, args.job)] if j]
     else:
         left = cfg["max_applications_per_day"] - db.applied_today(con)
         if left <= 0 and not args.dry_run:
             sys.exit(f"daily cap reached ({cfg['max_applications_per_day']})")
-        jobs = [dict(r) for r in db.queued(con, limit=max(left, 1))]
+        jobs = db.queued(con, limit=max(left, 1))
     if not jobs and not args.login:
         sys.exit("nothing queued - run scan.py / score.py first")
 
-    cache = load_cache()
+    cache = db.load_answers(con)
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
         ctx = p.chromium.launch_persistent_context(
@@ -364,7 +350,6 @@ def main():
             except Exception as e:  # keep going on any page weirdness
                 print(f"   error: {e}")
                 result, log = "failed", []
-            save_cache(cache)
             if log:
                 db.save_answers(con, job["job_id"], log, dry_run=args.dry_run)
             if result == "quit":

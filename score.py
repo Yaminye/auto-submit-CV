@@ -25,7 +25,7 @@ def bucket(score: int, cfg: dict) -> str:
 
 
 def score_pending(con, cfg: dict) -> None:
-    rows = [dict(r) for r in db.unscored(con)]
+    rows = db.unscored(con)
     log.info("scoring %d jobs", len(rows))
     for job in rows:
         fetched = None
@@ -47,7 +47,5 @@ if __name__ == "__main__":
     con = db.connect()
     if "--rescore" in sys.argv:
         # only jobs still waiting; jobs you moved by hand on the board keep their place
-        con.execute("UPDATE jobs SET score=NULL WHERE keep=1 AND status IN ('new','queued','review','low') "
-                    "AND COALESCE(apply_note,'') != 'set from dashboard'")
-        con.commit()
+        print(f"reset {db.reset_scores_waiting(con)} scores")
     score_pending(con, yaml.safe_load((ROOT / "config.yaml").read_text()))

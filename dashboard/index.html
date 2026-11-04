@@ -103,6 +103,13 @@ tbody tr.sel { background: var(--accent-soft); }
 .why { color: var(--muted); font-size: 12px; margin-top: 2px; }
 .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .empty { padding: 40px; text-align: center; color: var(--muted); }
+.intro { color: var(--muted); margin: 0 0 12px; }
+.answers tbody tr { cursor: default; }
+.answers input { width: 100%; font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 7px; padding: 5px 8px; }
+.answers input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.answers .acts { white-space: nowrap; text-align: right; }
+.answers .btn { padding: 4px 10px; font-size: 13px; }
 
 /* drawer */
 .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100%); background: var(--panel);
@@ -155,6 +162,7 @@ h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: v
   <div class="seg" id="views">
     <button data-v="board">Board</button>
     <button data-v="list">List</button>
+    <button data-v="answers">Answers</button>
   </div>
   <div class="spacer"></div>
   <input type="search" id="q" placeholder="Search title / company…">
@@ -203,13 +211,13 @@ const store = {
   get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
-let jobs = [], selected = null;
+let jobs = [], answers = [], meta = {}, selected = null;
 let view = store.get("view", "board");
 let collapsed = new Set(JSON.parse(store.get("collapsed", '["archive"]')));
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const day = s => s ? s.slice(0, 10) : "–";
+const day = s => !s ? "–" : s.length <= 10 ? s : new Date(s).toLocaleDateString("en-CA");   // local YYYY-MM-DD
 const scoreClass = s => s == null ? "sc-none" : s >= 70 ? "sc-hi" : s >= 50 ? "sc-mid" : "sc-lo";
 const colOf = j => COLUMNS.find(c => c.statuses.includes(j.status || "new")) || COLUMNS[0];
 const toTime = s => new Date(s.length <= 10 ? s + "T12:00:00" : s).getTime();
@@ -224,7 +232,7 @@ function ago(s) {
 }
 
 async function load() {
-  jobs = await (await fetch("/api/jobs")).json();
+  [jobs, answers, meta] = await Promise.all(["/api/jobs", "/api/answers", "/api/meta"].map(u => fetch(u).then(r => r.json())));
   const cats = [...new Set(jobs.filter(j => j.keep).map(j => j.category))].sort();
   const cur = $("cat").value;
   $("cat").innerHTML = '<option value="">All categories</option>' + cats.map(c => `<option>${esc(c)}</option>`).join("");
@@ -237,17 +245,56 @@ function filtered() {
   return jobs.filter(j => (!cat || j.category === cat) && (!q || (j.title + " " + j.company).toLowerCase().includes(q)));
 }
 
+function lastScan() {
+  const s = meta.last_scan;
+  if (!s || !s.started_at) return "no scan yet";
+  if (s.running) return `scan running since ${new Date(s.started_at).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})}`;
+  const t = new Date(s.finished_at);
+  const when = t.toDateString() === new Date().toDateString() ? "today" : day(s.finished_at);
+  return `last scan ${when} ${t.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"})} (+${s.kept ?? 0} kept)`;
+}
+
 function render() {
   document.querySelectorAll("#views button").forEach(b => b.classList.toggle("on", b.dataset.v === view));
   $("phase").hidden = view !== "list";
+  $("cat").hidden = view === "answers";
   const kept = jobs.filter(j => j.keep);
   const n = key => kept.filter(j => colOf(j).key === key).length;
   const interviewing = n("assignment") + n("interview1") + n("interview2");
   $("summary").innerHTML =
     `<b>${n("queued")}</b> to apply · <b>${n("review")}</b> to review · <b>${kept.filter(j => LATER.includes(j.status)).length}</b> applied` +
     ` · <b>${interviewing}</b> in process · <b>${n("offer")}</b> offers · <b>${kept.filter(isNew).length}</b> new today` +
-    `<span class="tip">— drag a card to move it, click it for the full description</span>`;
-  view === "board" ? renderBoard() : renderList();
+    ` · ${esc(lastScan())}<span class="tip">— drag a card to move it, click it for the full description</span>`;
+  ({board: renderBoard, list: renderList, answers: renderAnswers})[view]();
+}
+
+function renderAnswers() {
+  const q = $("q").value.trim().toLowerCase();
+  const rows = answers.filter(a => !q || (a.label + " " + a.value).toLowerCase().includes(q));
+  const intro = '<p class="intro">Answers you gave to Easy Apply questions. apply.py reuses them for the same question ' +
+    '(profile.yaml answers like phone or years per skill aren\'t listed here). Edit and press Enter or Save; ' +
+    'delete one to be asked again next time.</p>';
+  if (!rows.length) {
+    $("view").innerHTML = `<div class="list">${intro}<div class="empty">No saved answers yet — they appear after your first apply.py run.</div></div>`;
+    return;
+  }
+  $("view").innerHTML = `<div class="list">${intro}<table class="answers"><thead><tr>
+      <th>Question</th><th style="width:34%">Answer</th><th class="hide-sm">Updated</th><th></th></tr></thead>
+    <tbody>${rows.map(a => `<tr data-key="${esc(a._id)}">
+      <td dir="auto">${esc(a.label)}</td>
+      <td><input value="${esc(a.value)}" dir="auto" aria-label="Answer"></td>
+      <td class="hide-sm num lc">${day(a.updated_at)}</td>
+      <td class="acts"><button class="btn" data-save>Save</button> <button class="btn" data-del>Delete</button></td>
+    </tr>`).join("")}</tbody></table></div>`;
+}
+
+async function answerAction(tr, del) {
+  const key = tr.dataset.key, url = "/api/answers/" + encodeURIComponent(key);
+  if (del && !confirm("Delete this saved answer? apply.py will ask you again next time.")) return;
+  const r = await fetch(url, del ? {method: "DELETE"} : {method: "PUT", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({value: tr.querySelector("input").value})});
+  toast(r.ok ? (del ? "Answer deleted" : "Answer saved") : "Couldn't save: " + r.statusText);
+  await load();
 }
 
 function card(j) {
@@ -273,7 +320,7 @@ function renderBoard() {
   const groups = Object.fromEntries(COLUMNS.map(c => [c.key, []]));
   filtered().filter(j => j.keep).forEach(j => groups[colOf(j).key].push(j));
   const byScore = (a, b) => (b.score ?? -1) - (a.score ?? -1) || toTime(b.found_at) - toTime(a.found_at);
-  const byApplied = (a, b) => (b.applied_at || "").localeCompare(a.applied_at || "");
+  const byApplied = (a, b) => (b.applied_at ? toTime(b.applied_at) : 0) - (a.applied_at ? toTime(a.applied_at) : 0);
   $("view").innerHTML = `<div class="board" id="board">${COLUMNS.map(c => {
     const list = groups[c.key].sort(LATER.includes(c.key) ? byApplied : byScore);
     const isCol = c.collapsible && collapsed.has(c.key);
@@ -396,6 +443,9 @@ $("views").addEventListener("click", e => {
   view = b.dataset.v; store.set("view", view); render();
 });
 $("view").addEventListener("click", e => {
+  const ab = e.target.closest("[data-save], [data-del]");
+  if (ab) { answerAction(ab.closest("tr"), ab.hasAttribute("data-del")); return; }
+  if (view === "answers") return;
   const t = e.target.closest("[data-toggle]") || (e.target.closest(".col.collapsed")?.querySelector("[data-toggle]"));
   if (t) {
     const k = t.dataset.toggle;
@@ -405,6 +455,7 @@ $("view").addEventListener("click", e => {
   const item = e.target.closest("[data-id]"); if (item) openJob(item.dataset.id);
 });
 $("view").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.matches(".answers input")) { answerAction(e.target.closest("tr"), false); return; }
   const c = e.target.closest(".card"); if (c && e.key === "Enter") openJob(c.dataset.id);
 });
 // drag & drop

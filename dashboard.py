@@ -1,5 +1,7 @@
-"""Local dashboard for the job DB.   .venv/bin/python dashboard.py  ->  http://127.0.0.1:8765"""
-import json
+"""The job board -> http://127.0.0.1:8765
+Runs in Docker (docker compose up -d). Without Docker for the app: .venv/bin/python dashboard.py
+(MongoDB must be running either way)."""
+import os
 from pathlib import Path
 
 import uvicorn
@@ -10,17 +12,15 @@ from pydantic import BaseModel
 from jobfinder import db
 
 ROOT = Path(__file__).resolve().parent
-app = FastAPI(title="auto-submit dashboard")
+app = FastAPI(title="auto-submit board")
 
-LIST_COLS = ("job_id, category, title, company, location, posted, url, years, keep, reason, found_at, "
-             "sent_at, status, score, match_reason, applied_at, apply_note, "
-             "(apply_answers IS NOT NULL) AS has_answers")
-# statuses you can set by hand from the board (drag & drop / job panel)
+LIST_PROJECTION = {"description": 0, "apply_answers": 0}   # the board doesn't need the big fields
+# statuses you can set from the board (drag & drop / job panel)
 #   queued   -> apply.py will try it        applied -> you applied (by apply.py or by hand)
 #   assignment / interview1 / interview2 / offer / rejected -> your own pipeline stages
 #   new / low / external / failed are accepted too, so the board's Undo can restore them
-MANUAL_STATUSES = {"review", "queued", "applied", "assignment", "interview1", "interview2",
-                   "offer", "rejected", "skipped", "new", "low", "external", "failed"}
+STATUSES = {"review", "queued", "applied", "assignment", "interview1", "interview2",
+            "offer", "rejected", "skipped", "new", "low", "external", "failed"}
 
 
 @app.get("/")
@@ -30,20 +30,15 @@ def index():
 
 @app.get("/api/jobs")
 def jobs():
-    con = db.connect()
-    rows = con.execute(f"SELECT {LIST_COLS} FROM jobs ORDER BY found_at DESC").fetchall()
-    return [dict(r) for r in rows]
+    return db.find_jobs(db.connect(), {}, LIST_PROJECTION, sort=[("found_at", -1)])
 
 
 @app.get("/api/jobs/{job_id}")
 def job(job_id: str):
-    con = db.connect()
-    r = con.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
-    if not r:
+    j = db.get_job(db.connect(), job_id)
+    if not j:
         raise HTTPException(404, "job not found")
-    d = dict(r)
-    d["apply_answers"] = json.loads(d["apply_answers"]) if d.get("apply_answers") else None
-    return d
+    return j
 
 
 class StatusIn(BaseModel):
@@ -52,15 +47,50 @@ class StatusIn(BaseModel):
 
 @app.post("/api/jobs/{job_id}/status")
 def set_status(job_id: str, body: StatusIn):
-    if body.status not in MANUAL_STATUSES:
-        raise HTTPException(400, f"status must be one of {sorted(MANUAL_STATUSES)}")
-    con = db.connect()
-    if not con.execute("SELECT 1 FROM jobs WHERE job_id=? AND keep=1", (job_id,)).fetchone():
+    if body.status not in STATUSES:
+        raise HTTPException(400, f"status must be one of {sorted(STATUSES)}")
+    d = db.connect()
+    j = db.get_job(d, job_id)
+    if not j or not j.get("keep"):
         raise HTTPException(404, "job not found (or dropped by filters)")
-    db.set_status(con, job_id, body.status, note="set from dashboard")
+    db.set_status(d, job_id, body.status, note="set from dashboard")
     return {"ok": True}
 
 
+# ---- saved form answers (used by apply.py)
+
+@app.get("/api/answers")
+def answers():
+    return db.all_answers(db.connect())
+
+
+class AnswerIn(BaseModel):
+    value: str
+
+
+@app.put("/api/answers/{key:path}")
+def put_answer(key: str, body: AnswerIn):
+    d = db.connect()
+    cur = d.answers.find_one({"_id": key})
+    if not cur:
+        raise HTTPException(404, "answer not found")
+    db.save_answer(d, key, cur.get("label", key), body.value.strip())
+    return {"ok": True}
+
+
+@app.delete("/api/answers/{key:path}")
+def delete_answer(key: str):
+    if not db.delete_answer(db.connect(), key):
+        raise HTTPException(404, "answer not found")
+    return {"ok": True}
+
+
+@app.get("/api/meta")
+def meta():
+    return {"last_scan": db.get_meta(db.connect(), "last_scan") or None}
+
+
 if __name__ == "__main__":
-    print("Dashboard: http://127.0.0.1:8765")
-    uvicorn.run(app, host="127.0.0.1", port=8765, log_level="warning")
+    host = os.getenv("DASHBOARD_HOST", "127.0.0.1")   # 0.0.0.0 inside Docker (port is published on localhost only)
+    print("Board: http://127.0.0.1:8765", flush=True)
+    uvicorn.run(app, host=host, port=8765, log_level="warning")

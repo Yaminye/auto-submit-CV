@@ -1,3 +1,8 @@
+# daily runs (Israel time), done by the scheduler container
+schedule:
+  scan: "17:00"     # search + filter + Claude score -> new cards on the board
+  digest: "18:00"   # email/Telegram digest - only if SMTP/Telegram is set in .env
+
 location: Israel
 geo_id: "101620260"        # LinkedIn geoId for Israel
 posted_within_hours: 48     # only jobs from the last 1-2 days

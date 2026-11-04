@@ -1,0 +1,53 @@
+# docker compose up -d --build   -> MongoDB + the board (http://127.0.0.1:8765) + the daily scheduler
+# apply.py stays on the Mac (it opens a real Chrome) and talks to Mongo on localhost:27017.
+name: auto-submit
+
+x-app: &app
+  build: .
+  restart: unless-stopped
+  volumes:
+    - .:/app                       # code + config.yaml + profile.yaml: edit, then `docker compose restart`
+  depends_on:
+    mongo:
+      condition: service_healthy
+
+services:
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27017:27017"   # localhost only - no auth, never expose it on the network
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  dashboard:
+    <<: *app
+    command: python dashboard.py
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      DASHBOARD_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:8765:8765"
+
+  scheduler:
+    <<: *app
+    command: python scheduler.py
+    env_file: .env                 # ANTHROPIC_API_KEY, SMTP/Telegram
+    environment:
+      MONGO_URL: mongodb://mongo:27017
+      CV_PATH: /cv/cv.pdf
+      TZ: Asia/Jerusalem
+    volumes:
+      - .:/app
+      - type: bind
+        source: ${CV_PATH}         # your CV on the Mac (from .env), read-only for Claude scoring
+        target: /cv/cv.pdf
+        read_only: true
+
+volumes:
+  mongo-data:

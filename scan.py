@@ -1,9 +1,8 @@
-"""Runs ~17:00: search LinkedIn, filter, save matches to the DB."""
+"""Runs daily (scheduler.py, 17:00): search LinkedIn, filter, save to MongoDB, score with Claude."""
 import logging
+import os
 import sys
 from pathlib import Path
-
-import os
 
 import yaml
 from dotenv import load_dotenv
@@ -22,6 +21,8 @@ log = logging.getLogger("scan")
 def main():
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
     con = db.connect()
+    started = db.now()
+    db.set_meta(con, "last_scan", {"started_at": started, "finished_at": None, "running": True})
     seen = db.known_ids(con)
     seen_tc = db.known_title_company(con)
     kept = dropped = 0
@@ -64,6 +65,8 @@ def main():
         score_pending(con, cfg)
     else:
         log.info("ANTHROPIC_API_KEY not set - skipping Claude scoring")
+    db.set_meta(con, "last_scan", {"started_at": started, "finished_at": db.now(), "running": False,
+                                   "kept": kept, "dropped": dropped})
 
 
 if __name__ == "__main__":
