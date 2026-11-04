@@ -19,6 +19,7 @@ score_model: claude-sonnet-5-5   # claude-opus-5-5 = stronger, about 2x the pric
 apply_threshold: 70         # >= this -> apply queue
 review_threshold: 50        # 50-69 -> saved for review, not applied
 max_applications_per_day: 20
+follow_companies: false     # false = untick LinkedIn's "Follow <company>" box before every Submit
 
 # category -> search keywords
 queries:

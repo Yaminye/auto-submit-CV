@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 import uuid
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -74,9 +75,13 @@ EASY = '<button class="d7ilww" type="button" aria-label="Easy Apply to this job"
 EASY_DIALOG = EASY.replace("openApply()", "dlg.showModal()")
 
 
-def one_page_dialog(on_submit):
+def one_page_dialog(on_submit, checked="r1"):
     """The real new form ("Apply to Omnisys", 2026-11-04): native <dialog>, all pre-filled from the LinkedIn
-    profile, CV radios named only by aria-label, Submit right away (no Next)."""
+    profile, a card per stored CV (file name in aria-label + upload date), "Follow" ticked, Submit right away.
+    "Upload resume" opens a file picker (no file input in the dialog)."""
+    def cv(rid, name, day):
+        return (f'<div><div><span>PDF</span><p>{name}</p><p>{day}</p></div><input id="{rid}" type="radio" name="cv" '
+                f'aria-label="{name}"{" checked" if rid == checked else ""}><label for="{rid}"></label></div>')
     return f"""<dialog id="dlg" data-testid="dialog" aria-labelledby="dialog-header">
  <header id="dialog-header"><h2>Apply to MockCo</h2></header>
  <button type="button" aria-label="Dismiss" onclick="dlg.close()">x</button>
@@ -87,17 +92,27 @@ def one_page_dialog(on_submit):
   <select id="cc" required><option value="ad">Andorra (+376)</option><option value="il" selected>Israel (+972)</option></select>
   <label for="ph"><span>Phone*</span></label><input id="ph" type="tel" required value="+972500000000">
   <div><h3>Resume</h3><p>Select or upload a resume in DOC, DOCX, or PDF format</p></div>
-  <fieldset role="radiogroup">
-   <input id="r1" type="radio" name="cv" aria-label="mock-cv.pdf" checked><label for="r1"></label>
-   <input id="r2" type="radio" name="cv" aria-label="Old CV.pdf"><label for="r2"></label></fieldset>
-  <button type="button">Upload resume</button>
-  <input id="fol" type="checkbox" checked aria-label="Follow MockCo"><label for="fol"></label>
+  <fieldset role="radiogroup" id="cvs">{cv("r1", "mock-cv.pdf", "11/3/2026")}{cv("r2", "mock-cv.pdf", "10/30/2026")}{cv("r3", "Cover Letter.pdf", "11/5/2026")}</fieldset>
+  <button type="button" onclick="up.click()">Upload resume</button>
+  <input id="fol" type="checkbox" checked aria-label="Follow MockCo to stay up to date with their page"><label for="fol"></label>
   <button type="button" onclick="{on_submit}">Submit application</button></div>
-</dialog>"""
+</dialog>
+<input type="file" id="up" style="display:none" onchange="addCv()">
+<script>function addCv() {{     // LinkedIn puts the upload on top, dated today, selected
+  const d = new Date(), day = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+  document.querySelectorAll('#cvs input').forEach(r => r.checked = false);
+  const div = document.createElement('div');
+  div.innerHTML = '<div><span>PDF</span><p>mock-cv.pdf</p><p>' + day + '</p></div>' +
+                  '<input id="rn" type="radio" name="cv" aria-label="mock-cv.pdf" checked><label for="rn"></label>';
+  cvs.prepend(div); document.body.dataset.uploaded = up.files[0].name; }}</script>"""
 
 
-SENT = "document.body.dataset.submitted='yes'; dbody.innerHTML='<p>Your application was sent to MockCo</p>'"
+# Submit: remember what was sent (which CV, Follow ticked?), then show LinkedIn's confirmation
+SENT = ("document.body.dataset.submitted='yes'; document.body.dataset.follow=fol.checked; "
+        "document.body.dataset.cv=document.querySelector('#cvs input:checked').id; "
+        "dbody.innerHTML='<p>Your application was sent to MockCo</p>'")
 NOTHING = "document.body.dataset.clicked='yes'"       # LinkedIn shows no confirmation
+OCT30 = datetime(2026, 10, 30, 9, 7).timestamp()       # like your real CV file
 SITE = ('<a class="d7ii5k" target="_blank" aria-label="Apply on company website" '
         'href="https://www.linkedin.com/safety/go/?url=https%3A%2F%2Fcareers.mockco.example%2Fjob"><span>Apply</span></a>')
 COMPANY = """<html><body><h1>MockCo careers - Backend Engineer</h1>
@@ -121,6 +136,7 @@ PAGES = {
         '<label for="color">What is your favorite color?</label><input id="color" type="text" required>')),
     "https://www.linkedin.com/jobs/view/D1/": job_page(EASY_DIALOG, extra=one_page_dialog(SENT)),
     "https://www.linkedin.com/jobs/view/D2/": job_page(EASY_DIALOG, extra=one_page_dialog(NOTHING)),
+    "https://www.linkedin.com/jobs/view/D3/": job_page(EASY_DIALOG, extra=one_page_dialog(SENT, checked="r2")),
     "https://www.linkedin.com/jobs/view/C1/": job_page(SITE),
     "https://www.linkedin.com/jobs/view/N1/": job_page("<p>Applied Materials · posted 2 days ago</p>"),
     "https://careers.mockco.example/job": COMPANY,
@@ -249,14 +265,47 @@ try:
         check("left in the queue, not 'failed' / not 'applied'", result == "queued", result)
         page.close()
 
-        print("6) new one-page form (<dialog>), everything pre-filled by LinkedIn")
+        def sent(page, key):
+            return page.evaluate(f"document.body.dataset.{key}")
+
+        print("6) new one-page form (<dialog>): pre-filled, your file (Oct 30) older than the newest copy (Nov 3)")
+        os.utime(CV, (OCT30, OCT30))
         script = Script(("Submit?", "y"))
         page, _, (result, log), _ = run("D1", script)
         check("result = applied, LinkedIn confirmed (no 'didn't confirm' question)",
               result == "applied" and not any("didn't confirm" in pr for pr in script.prompts), script.prompts)
         check("touched nothing pre-filled: no Fill / new-question prompts, empty answer log",
               not any(pr.startswith(("? Fill", "Done?")) for pr in script.prompts) and log == [], (script.prompts, log))
-        check("Submit clicked", page.evaluate("document.body.dataset.submitted") == "yes")
+        check("no upload, sent the newest copy (Nov 3; not the newer-dated cover letter)",
+              sent(page, "uploaded") is None and sent(page, "cv") == "r1"
+              and not any("Upload your CV" in pr for pr in script.prompts), script.prompts)
+        check("asked to untick 'Follow', and it was unticked when sent",
+              any(pr.startswith("? Untick 'Follow MockCo") for pr in script.prompts) and sent(page, "follow") == "false")
+        page.close()
+
+        print("6b) an older copy is selected -> selects the newest copy")
+        script = Script(("Submit?", "y"))
+        page, _, (result, _), _ = run("D3", script)
+        check("asked, then sent the Nov 3 copy instead of the Oct 30 one",
+              any(pr.startswith("? Select your CV") for pr in script.prompts) and sent(page, "cv") == "r1"
+              and result == "applied", (script.prompts, sent(page, "cv")))
+        page.close()
+
+        print("6c) you changed your CV file after the newest copy -> uploads it and sends it")
+        os.utime(CV, None)                          # file changed now (after Nov 3)
+        script = Script(("Submit?", "y"))
+        page, _, (result, _), _ = run("D1", script)
+        check("asked to upload, uploaded through LinkedIn's file picker",
+              any(pr.startswith("? Upload your CV 'mock-cv.pdf'") for pr in script.prompts)
+              and sent(page, "uploaded") == "mock-cv.pdf", script.prompts)
+        check("the new upload (today) is the CV that was sent", sent(page, "cv") == "rn" and result == "applied",
+              sent(page, "cv"))
+        page.close()
+
+        print("6d) 'n' to untick Follow -> stays ticked")
+        os.utime(CV, (OCT30, OCT30))
+        page, _, (result, _), _ = run("D1", Script(("Untick", "n"), ("Submit?", "y")))
+        check("Follow left as LinkedIn had it", sent(page, "follow") == "true" and result == "applied")
         page.close()
 
         print("7) Submit clicked but LinkedIn shows no confirmation -> asks you; n = stays in the queue")

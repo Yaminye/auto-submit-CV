@@ -23,7 +23,7 @@ import random
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
@@ -139,6 +139,38 @@ COLLECT_JS = r"""
   return out;
 }
 """
+
+# Easy Apply's list of CVs you uploaded before -> [{id, name, date: [y, m, d] | null, checked}]
+# new layout: a card per CV ("PDF  Yehonatan Yamin - CV.pdf  11/3/2026"), the file name in the radio's aria-label
+RESUMES_JS = r"""
+(root) => {
+  const out = [];
+  for (const r of root.querySelectorAll('input[type=radio]')) {
+    let card = r;    // the radio's card: grow while the parent still holds only this one radio
+    while (card.parentElement && card.parentElement !== root &&
+           card.parentElement.querySelectorAll('input[type=radio]').length === 1) card = card.parentElement;
+    const name = (r.getAttribute('aria-label') || '').trim();
+    const text = `${name} ${card.innerText || ''}`.replace(/\s+/g, ' ').trim();
+    if (!/\.(pdf|docx?)\b/i.test(text)) continue;                 // not a CV (a Yes/No question...)
+    const m = text.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{4})\b/);   // English UI: M/D/YYYY
+    if (!r.getAttribute('data-as-cv')) r.setAttribute('data-as-cv', 'cv' + (window.__asSeq = (window.__asSeq || 0) + 1));
+    out.push({id: r.getAttribute('data-as-cv'), name: name || text.slice(0, 80),
+              date: m ? [+m[3], +m[1], +m[2]] : null, checked: r.checked});
+  }
+  return out;
+}
+"""
+
+# checkboxes with their label -> [{id, label, checked}] (to find "Follow <company> to stay up to date...")
+CHECKBOXES_JS = r"""
+(root) => [...root.querySelectorAll('input[type=checkbox]')].map(el => {
+  const l = el.id && root.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+  const label = ((l && l.innerText.trim()) || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+  if (!el.getAttribute('data-as-cb')) el.setAttribute('data-as-cb', 'cb' + (window.__asSeq = (window.__asSeq || 0) + 1));
+  return {id: el.getAttribute('data-as-cb'), label, checked: el.checked};
+})
+"""
+FOLLOW_TEXT = re.compile(r"^follow\b.*|stay up to date with (their|the company'?s?) page", re.I)
 
 CLICK_RADIO_JS = r"""
 (fs, value) => {
@@ -337,6 +369,91 @@ def upload_resume_if_needed(modal, cv_path: str) -> None:
             print("   uploaded CV")
             pause(2, 3)
             return
+
+
+def _cv_day(entry: dict) -> date | None:
+    if not entry.get("date"):
+        return None
+    y, mo, d = entry["date"]
+    if mo > 12:                                   # D/M/YYYY (other UI language)
+        mo, d = d, mo
+    try:
+        return date(y, mo, d)
+    except ValueError:
+        return None
+
+
+def easy_apply_cv(modal, page: Page, cv_path: str, state: dict) -> None:
+    """Easy Apply lists the CVs you uploaded before, each with its upload date. Upload your CV file only if it
+    changed after LinkedIn's newest copy of it (same file name) or there's no copy; otherwise make sure that
+    newest copy is the selected one. state: per application, so it's done once."""
+    if state.get("cv_done"):
+        return
+    entries = modal.evaluate(RESUMES_JS)
+    upload_btn = modal.get_by_role("button", name=re.compile(r"upload (resume|cv)", re.I))
+    file_inputs = modal.locator("input[type=file]")
+    if not entries and not upload_btn.count() and not (
+            file_inputs.count() and re.search(r"\bresume\b|\bcv\b|קורות חיים", modal.inner_text(), re.I)):
+        return                                    # no CV section on this step
+    state["cv_done"] = True
+    fname = Path(cv_path).name.lower()
+    file_day = datetime.fromtimestamp(Path(cv_path).stat().st_mtime).date()
+    mine = [(day, e) for e in entries if fname in e["name"].lower() and (day := _cv_day(e))]
+    newest_day, newest = max(mine, key=lambda x: x[0], default=(None, None))   # ties: first = top of the list
+
+    if newest is not None and newest_day >= file_day:
+        if newest["checked"]:
+            print(f"   CV: LinkedIn's copy from {newest_day} is selected (your file: {file_day}) - no upload")
+        elif confirm(f"Select your CV '{newest['name'][:40]}' from {newest_day} (newest copy; your file: {file_day})"):
+            modal.locator(f'[data-as-cv="{newest["id"]}"]').evaluate("el => el.click()")
+            print(f"   CV: selected LinkedIn's copy from {newest_day}")
+        return
+
+    why = f"LinkedIn's newest copy is from {newest_day}" if newest is not None else "no copy on LinkedIn yet"
+    if not confirm(f"Upload your CV '{Path(cv_path).name}' (file changed {file_day}; {why})"):
+        return
+    try:
+        inputs = [file_inputs.nth(i) for i in range(file_inputs.count())]
+        inp = next((x for x in inputs
+                    if "cover" not in f"{x.get_attribute('id')} {x.get_attribute('name')}".lower()), None)
+        if inp is not None:                       # old layout: a file input in the form
+            inp.set_input_files(cv_path)
+        else:                                     # new layout: a button that opens the file picker
+            with page.expect_file_chooser(timeout=8000) as chooser:
+                upload_btn.first.click()
+            chooser.value.set_files(cv_path)
+    except PWTimeout:
+        print("   couldn't upload the CV - upload it in the browser")
+        return
+    if not entries:                               # a plain file field, no list of stored CVs to pick from
+        print(f"   CV: uploaded your file (changed {file_day})")
+        return
+    for _ in range(12):                           # it appears on top with today's date: make sure it's selected
+        time.sleep(1)
+        fresh = [e for e in modal.evaluate(RESUMES_JS) if fname in e["name"].lower() and _cv_day(e) == date.today()]
+        if fresh:
+            if not fresh[0]["checked"]:
+                modal.locator(f'[data-as-cv="{fresh[0]["id"]}"]').evaluate("el => el.click()")
+            print(f"   CV: uploaded your file (changed {file_day}) and selected it")
+            return
+    print("   uploaded the CV, but can't see it in the list - check which CV is selected in the browser")
+
+
+def untick_follow(modal) -> None:
+    """Untick "Follow <company> to stay up to date with their page" (config follow_companies: false)."""
+    for cb in modal.evaluate(CHECKBOXES_JS):
+        if not (cb["checked"] and FOLLOW_TEXT.search(cb["label"])):
+            continue
+        if not confirm(f"Untick '{cb['label'][:70]}'"):
+            continue
+        box = modal.locator(f'[data-as-cb="{cb["id"]}"]')
+        try:
+            box.uncheck(timeout=3000)
+        except Exception:                         # hidden/custom checkbox -> plain JS click below
+            pass
+        if box.is_checked():
+            box.evaluate("el => el.click()")
+        print("   unticked 'Follow'" if not box.is_checked() else "   couldn't untick 'Follow' - untick it in the browser")
 
 
 def fill_field(modal, page: Page, f: dict, value: str) -> bool:
@@ -587,10 +704,11 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
     if frame is not page.main_frame:
         print("   (the form is inside an iframe)")
     log: list = []
+    cv_state: dict = {}
 
     for n in range(15):
         pause(1.2, 2.0)
-        upload_resume_if_needed(modal, cfg["cv_path"])
+        easy_apply_cv(modal, page, cfg["cv_path"], cv_state)
         step = fill_step(modal, frame, con, profile, cache, log)
         snap(page, f"easy-apply-step-{n + 1}")
         if step != "ok":
@@ -598,6 +716,9 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             return ("quit" if step == "quit" else "skipped"), log
 
         if modal.locator(SUBMIT_BTN).count() and modal.locator(SUBMIT_BTN).first.is_visible():
+            if not cfg.get("follow_companies", False):
+                untick_follow(modal)
+                snap(page, "ready-to-submit")
             print_log(log)
             if dry_run:
                 print("   [dry-run] reached Submit - discarding")
