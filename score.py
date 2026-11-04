@@ -33,7 +33,7 @@ def score_pending(con, cfg: dict) -> None:
             fetched = linkedin.details(job["job_id"])["description"]
             job["description"] = fetched
             linkedin._pause(1.0, 2.0)
-        res = claude.score_job(job)
+        res = claude.score_job(job, cfg.get("score_model"))
         if res is None:
             continue   # stays unscored, retried next run
         score, reason = res

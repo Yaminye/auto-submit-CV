@@ -10,7 +10,7 @@ from pypdf import PdfReader
 
 log = logging.getLogger("claude")
 ROOT = Path(__file__).resolve().parent.parent
-MODEL = "claude-opus-5-5"
+MODEL = "claude-sonnet-5-5"      # default; config.yaml `score_model` overrides it
 FALLBACK_BETA = "server-side-fallback-2026-07-01"   # re-runs on another model if a request is refused
 
 
@@ -27,12 +27,11 @@ def cv_text() -> str:
     return "\n".join(p.extract_text() or "" for p in PdfReader(path).pages)
 
 
-
-def _call(system: str, user: str, schema: dict, max_tokens: int = 4000) -> dict | None:
+def _call(system: str, user: str, schema: dict, max_tokens: int = 4000, model: str = MODEL) -> dict | None:
     """One structured-output call. Returns parsed JSON or None on failure."""
     try:
         resp = client().beta.messages.create(
-            model=MODEL,
+            model=model,
             max_tokens=max_tokens,
             betas=[FALLBACK_BETA],
             fallbacks="default",
@@ -97,10 +96,10 @@ Scoring guide (0-100):
 Judge on the actual requirements, not on keywords. Write the reason in English, at most 20 words."""
 
 
-def score_job(job: dict) -> tuple[int, str] | None:
+def score_job(job: dict, model: str | None = None) -> tuple[int, str] | None:
     user = (f"Job: {job['title']} at {job['company']} ({job.get('location', '')})\n\n"
             f"Description:\n{(job.get('description') or '')[:12000]}")
-    out = _call(_score_system(), user, SCORE_SCHEMA, max_tokens=2000)
+    out = _call(_score_system(), user, SCORE_SCHEMA, max_tokens=2000, model=model or MODEL)
     if not out:
         return None
     return max(0, min(100, int(out["score"]))), out["reason"]

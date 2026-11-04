@@ -12,6 +12,7 @@ easy_apply_only: false      # true = only Easy Apply jobs; false = also company 
 exclude_senior_titles: false  # true = also drop titles with senior_title_words (years filter still applies)
 
 # Claude match score (0-100) vs your CV
+score_model: claude-sonnet-5-5   # claude-opus-5-5 = stronger, about 2x the price
 apply_threshold: 70         # >= this -> apply queue
 review_threshold: 50        # 50-69 -> saved for review, not applied
 max_applications_per_day: 20
