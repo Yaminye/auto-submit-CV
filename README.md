@@ -18,10 +18,11 @@ puts it on a local job board, and applies (semi-auto) to the good matches via Ea
 |---|---|
 | Docker `mongo` | MongoDB - all the data (volume `auto-submit_mongo-data`) |
 | Docker `dashboard` | the board at http://127.0.0.1:8765 |
-| Docker `scheduler` | 17:00 scan + Claude scoring (18:00 digest only if email/Telegram is set) |
+| Docker `scheduler` | **off for now** - daily 17:00 scan + scoring. Turn on: `docker compose --profile schedule up -d` |
 | Your Mac | `apply.py` - opens a real Chrome for Easy Apply, talks to Mongo on `localhost:27017` |
 
-Docker Desktop must be running. If the Mac was asleep at 17:00, the scan runs as soon as Docker is up again that day.
+Docker Desktop must be running. Scans run by hand for now (see Commands); with the scheduler on, a scan missed
+while the Mac was asleep runs as soon as Docker is up again that day.
 
 ## Where the data lives
 
@@ -41,7 +42,7 @@ Browse the raw data with MongoDB Compass: `mongodb://localhost:27017` (bound to 
 ```bash
 cp .env.example .env                 # ANTHROPIC_API_KEY, CV_PATH (+ optional Gmail/Telegram)
 cp profile.example.yaml profile.yaml # your form answers - check skill_years!
-docker compose up -d --build         # Mongo + board + scheduler
+docker compose up -d --build         # Mongo + board
 
 # for apply.py on the Mac
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -49,7 +50,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ```
 
 ## Daily use
-1. 17:00 - the scheduler scans and scores; new cards show up on the board with a NEW badge
+1. Scan: `.venv/bin/python scan.py` (or 17:00 automatically once the scheduler is on) - new cards get a NEW badge
 2. Open http://127.0.0.1:8765 - check **Review**, drag anything you want into **To apply**
 3. `.venv/bin/python apply.py` - goes through **To apply**, stops on new questions and before every Submit
 4. Move cards along as you hear back: Assignment → Interview 1 → Interview 2 → Offer / Rejected
@@ -57,13 +58,14 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ## Commands
 ```bash
 docker compose ps                                  # what's running
-docker compose logs -f scheduler                   # scan output
-docker compose restart                             # after editing code (config.yaml is re-read on its own)
+docker compose restart                             # after editing code
 docker compose up -d --build                       # after changing requirements.txt
-docker compose exec scheduler python scan.py       # scan now
-docker compose exec scheduler python score.py --rescore
-docker compose exec scheduler python recheck.py [--dropped]   # re-run filters after editing config.yaml
-docker compose exec scheduler python send.py --preview        # digest -> data/preview.html
+.venv/bin/python scan.py                           # scan + score now (on the Mac, talks to Mongo on localhost)
+.venv/bin/python score.py --rescore
+.venv/bin/python recheck.py [--dropped]            # re-run filters after editing config.yaml
+.venv/bin/python send.py --preview                 # digest -> data/preview.html
+docker compose --profile schedule up -d            # turn the daily 17:00 scan on
+docker compose logs -f scheduler                   # its output
 docker compose down                                # stop (data stays in the volume)
 ```
 

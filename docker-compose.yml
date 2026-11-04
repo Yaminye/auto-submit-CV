@@ -1,4 +1,5 @@
-# docker compose up -d --build   -> MongoDB + the board (http://127.0.0.1:8765) + the daily scheduler
+# docker compose up -d --build   -> MongoDB + the board (http://127.0.0.1:8765)
+# The daily scheduler is OFF. Turn it on later with:  docker compose --profile schedule up -d
 # apply.py stays on the Mac (it opens a real Chrome) and talks to Mongo on localhost:27017.
 name: auto-submit
 
@@ -34,8 +35,9 @@ services:
     ports:
       - "127.0.0.1:8765:8765"
 
-  scheduler:
+  scheduler:                       # daily 17:00 scan - off unless started with --profile schedule
     <<: *app
+    profiles: ["schedule"]
     command: python scheduler.py
     env_file: .env                 # ANTHROPIC_API_KEY, SMTP/Telegram
     environment:

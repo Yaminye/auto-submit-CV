@@ -1,4 +1,4 @@
-# daily runs (Israel time), done by the scheduler container
+# daily runs (Israel time) - only if the scheduler is on: docker compose --profile schedule up -d
 schedule:
   scan: "17:00"     # search + filter + Claude score -> new cards on the board
   digest: "18:00"   # email/Telegram digest - only if SMTP/Telegram is set in .env
