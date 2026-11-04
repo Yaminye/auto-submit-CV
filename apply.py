@@ -14,6 +14,8 @@ The description and the answers used are saved to the DB (see the board).
   .venv/bin/python apply.py --job 4486487512
   .venv/bin/python apply.py --login      # just open the browser to log in
   --debug   save a log + a screenshot and the page HTML of every step to logs/apply/<time>/
+  --step    ask y/n before EVERY action (open job, click, fill each field, upload CV, Next, Submit);
+            implies --debug
 """
 import argparse
 import os
@@ -56,7 +58,9 @@ JOB_DESCRIPTION = "#job-details, div.jobs-description__content, div.jobs-descrip
 # all=true -> every field with its current value (to read back what you typed).
 COLLECT_JS = r"""
 (root, all) => {
-  const out = []; let i = 0;
+  const out = [];
+  // ids unique for the whole page: fields of earlier steps can stay in the DOM (hidden) with old ids
+  const nextId = () => 'f' + (window.__asSeq = (window.__asSeq || 0) + 1);
   const undouble = s => {  // "QuestionQuestion" (visible + visually-hidden copy) -> "Question"
     const h = s.length / 2;
     return (Number.isInteger(h) && s.slice(0, h) === s.slice(h)) ? s.slice(0, h).trim() : s;
@@ -70,7 +74,7 @@ COLLECT_JS = r"""
     return clean(el.getAttribute('aria-label') || el.placeholder || '');
   };
   const req = el => el.required || el.getAttribute('aria-required') === 'true';
-  const tag = el => { const id = 'f' + (i++); el.setAttribute('data-as-id', id); return id; };
+  const tag = el => { const id = nextId(); el.setAttribute('data-as-id', id); return id; };
 
   root.querySelectorAll('input[type=text], input[type=number], input[type=tel], input[type=email], input[type=url], input:not([type]), textarea')
     .forEach(el => {
@@ -158,6 +162,32 @@ def snap(page, tag: str) -> None:
         print(f"   (snapshot failed: {e})")
 
 
+STEP = {"on": False}
+
+
+class Quit(Exception):
+    """You pressed q - stop the whole run."""
+
+
+def confirm(action: str) -> bool:
+    """--step: ask before doing `action`. y = do it, n = don't, q = stop the run. Always True otherwise."""
+    if not STEP["on"]:
+        return True
+    a = ask(f"   ? {action}  [y/n/q]", "ynq")
+    if a == "q":
+        raise Quit()
+    return a == "y"
+
+
+def visible_button(root, selector: str):
+    btns = root.locator(selector)
+    for i in range(btns.count()):
+        b = btns.nth(i)
+        if b.is_visible() and b.is_enabled():
+            return b
+    return None
+
+
 def pause(a=0.8, b=2.2):
     time.sleep(random.uniform(a, b))
 
@@ -205,6 +235,8 @@ def upload_resume_if_needed(modal, cv_path: str) -> None:
         if "cover" in meta:
             continue
         if "resume" in meta or "resume" in text or "cv" in text:
+            if not confirm(f"Upload CV '{Path(cv_path).name}'"):
+                return
             inp.set_input_files(cv_path)
             print("   uploaded CV")
             pause(2, 3)
@@ -235,7 +267,8 @@ def fill_known(root, page_like, profile: dict, cache: dict, log: list) -> list[d
     new = []
     for f in root.evaluate(COLLECT_JS, False):
         hit = lookup(f, profile, cache)
-        if hit and fill_field(root, page_like, f, hit[0]):
+        if hit and confirm(f"Fill '{f['label'][:60]}' with '{hit[0][:50]}' ({hit[1]})") \
+                and fill_field(root, page_like, f, hit[0]):
             log.append({"label": f["label"], "value": hit[0], "source": hit[1]})
         else:
             new.append(f)
@@ -332,11 +365,12 @@ def company_apply(site: Page, con, cfg: dict, profile: dict, cache: dict, dry_ru
     roots = form_roots(site)
     if not roots:   # the form is often behind the site's own "Apply" button
         btn = site.get_by_role("link", name=SITE_APPLY).or_(site.get_by_role("button", name=SITE_APPLY)).first
-        try:
-            btn.click(timeout=5000)
-            pause(2.5, 4)
-        except PWTimeout:
-            pass
+        if btn.count() and confirm(f"Click the site's '{(btn.inner_text() or 'Apply').strip()[:30]}' button"):
+            try:
+                btn.click(timeout=5000)
+                pause(2.5, 4)
+            except PWTimeout:
+                pass
         roots = form_roots(site)
     if not roots:
         snap(site, "company-no-form-found")
@@ -375,6 +409,9 @@ def click_first_visible(modal, selector: str) -> bool:
 
 
 def discard(page: Page) -> None:
+    if not confirm("Close the form and discard this unfinished application"):
+        print("   left the form open")
+        return
     try:
         page.locator(DISMISS_BTN).first.click(timeout=3000)
         pause(0.8, 1.5)
@@ -392,6 +429,8 @@ def print_log(log: list) -> None:
 def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict, dry_run: bool) -> tuple[str, list]:
     """Returns (result, answers log). result: applied / queued (later) / skipped / external / failed / quit"""
     print(f"\n=== [{job['score']}] {job['title']} @ {job['company']}\n    {job['url']}\n    {job['match_reason']}")
+    if not confirm("Open this job on LinkedIn"):
+        return "queued", []
     page.goto(job["url"], wait_until="domcontentloaded")
     pause(2.5, 4.5)
     save_description(con, page, job)
@@ -421,6 +460,8 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
         if cfg.get("easy_apply_only"):
             print("   company site - skipped (easy_apply_only: true)")
             return "external", []
+        if not confirm("Click 'Apply' (opens the company site)"):
+            return "queued", []
         site = open_company_site(page)
         if site is None:
             snap(page, "company-site-not-opened")
@@ -431,13 +472,14 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             site = next((pg for pg in reversed(page.context.pages) if "linkedin.com" not in pg.url), None)
             if site is None:
                 return "failed", []
-        try:
-            return company_apply(site, con, cfg, profile, cache, dry_run)
-        finally:
-            if site is not page:
-                pause(1.5, 2.5)
-                site.close()
+        result = company_apply(site, con, cfg, profile, cache, dry_run)   # q (Quit) leaves the tab open
+        if site is not page and confirm("Close the company site tab"):
+            pause(1.5, 2.5)
+            site.close()
+        return result
 
+    if not confirm("Click 'Easy Apply'"):
+        return "queued", []
     btn.click()
     try:
         page.locator(MODAL).first.wait_for(state="visible", timeout=10000)
@@ -475,13 +517,21 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             print("   ✔ submitted")
             return "applied", log
 
-        if not (click_first_visible(modal, REVIEW_BTN) or click_first_visible(modal, NEXT_BTN)):
+        nxt = visible_button(modal, REVIEW_BTN) or visible_button(modal, NEXT_BTN)
+        if nxt is None:
             snap(page, "stuck-no-next-button")
             a = ask("   Stuck (no Next/Review). Fix it in the browser, then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
                 discard(page)
                 return ("quit" if a == "q" else "skipped"), log
             continue
+        if not confirm(f"Click '{(nxt.inner_text() or 'Next').strip()[:30]}'"):
+            a = ask("   OK - do it yourself in the browser, then [c]ontinue / [s]kip job / [q]uit:", "csq")
+            if a != "c":
+                discard(page)
+                return ("quit" if a == "q" else "skipped"), log
+            continue
+        nxt.click()
 
         pause(1.0, 1.8)
         if modal.locator(FIELD_ERROR).count():
@@ -490,7 +540,9 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             if a != "c":
                 discard(page)
                 return ("quit" if a == "q" else "skipped"), log
-            click_first_visible(modal, REVIEW_BTN) or click_first_visible(modal, NEXT_BTN)
+            nxt = visible_button(modal, REVIEW_BTN) or visible_button(modal, NEXT_BTN)
+            if nxt is not None and confirm(f"Click '{(nxt.inner_text() or 'Next').strip()[:30]}'"):
+                nxt.click()
 
     print("   too many steps - giving up")
     snap(page, "too-many-steps")
@@ -504,8 +556,10 @@ def main():
     ap.add_argument("--job", help="apply to one job id (any status)")
     ap.add_argument("--login", action="store_true", help="only open the browser to log in")
     ap.add_argument("--debug", action="store_true", help="log + screenshot + HTML of every step (logs/apply/)")
+    ap.add_argument("--step", action="store_true", help="ask y/n before every action (implies --debug)")
     args = ap.parse_args()
-    if args.debug:
+    STEP["on"] = args.step
+    if args.debug or args.step:
         print(f"debug log + screenshots: {start_debug()}")
 
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
@@ -539,10 +593,15 @@ def main():
             ctx.close()
             return
 
-        print(f"{len(jobs)} job(s) to go{' (dry-run)' if args.dry_run else ''}")
-        for job in jobs:
+        print(f"{len(jobs)} job(s) to go{' (dry-run)' if args.dry_run else ''}"
+              f"{' - step mode: y = do it, n = skip that action, q = stop' if args.step else ''}")
+        for i, job in enumerate(jobs, 1):
+            print(f"\n--- job {i}/{len(jobs)}")
             try:
                 result, log = apply_one(page, con, job, cfg, profile, cache, args.dry_run)
+            except Quit:
+                print("   stopped by you")
+                break
             except Exception as e:  # keep going on any page weirdness
                 print(f"   error: {e}")
                 snap(page, "error")
@@ -551,7 +610,7 @@ def main():
                 db.save_answers(con, job["job_id"], log, dry_run=args.dry_run)
             if result == "quit":
                 break
-            if not args.dry_run:
+            if not args.dry_run and result != "queued":   # "queued" = untouched / later
                 db.set_status(con, job["job_id"], result)
             pause(4, 9)   # human-ish gap between applications
         ctx.close()
