@@ -13,6 +13,7 @@ The description and the answers used are saved to the DB (see the board).
   .venv/bin/python apply.py --dry-run    # fill forms, never submit (discards at the end)
   .venv/bin/python apply.py --job 4486487512
   .venv/bin/python apply.py --login      # just open the browser to log in
+  --debug   save a log + a screenshot and the page HTML of every step to logs/apply/<time>/
 """
 import argparse
 import os
@@ -20,6 +21,7 @@ import random
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import yaml
@@ -39,10 +41,13 @@ CONTINUE_BTN = "div[role=dialog] button:has-text('Continue'), div[role=dialog] a
 VISIBLE_FIELDS = "input:not([type=hidden]):not([type=file]):visible, select:visible, textarea:visible"
 SITE_APPLY = re.compile(r"^\s*(apply|apply now|apply for this (job|position|role)|הגש(ת)? מועמדות)\s*$", re.I)
 MODAL = "div.jobs-easy-apply-modal, div[data-test-modal][role='dialog'], div[role='dialog']:has(form)"
-SUBMIT_BTN = "button[aria-label='Submit application'], button:has-text('Submit application')"
-REVIEW_BTN = "button[aria-label='Review your application'], button:has-text('Review')"
-NEXT_BTN = "button[aria-label='Continue to next step'], button:has-text('Next')"
-DISMISS_BTN = "button[aria-label='Dismiss']"
+SUBMIT_BTN = ("button[aria-label='Submit application'], button:has-text('Submit application'), "
+              "button[data-live-test-easy-apply-submit-button]")
+REVIEW_BTN = ("button[aria-label='Review your application'], button:has-text('Review'), "
+              "button[data-live-test-easy-apply-review-button]")
+NEXT_BTN = ("button[aria-label='Continue to next step'], button:has-text('Next'), "
+            "button[data-easy-apply-next-button], button[data-live-test-easy-apply-next-button]")
+DISMISS_BTN = "button[aria-label='Dismiss'], button.artdeco-modal__dismiss"
 DISCARD_BTN = "button[data-control-name='discard_application_confirm_btn'], button:has-text('Discard')"
 FIELD_ERROR = ".artdeco-inline-feedback--error"
 JOB_DESCRIPTION = "#job-details, div.jobs-description__content, div.jobs-description-content__text"
@@ -110,6 +115,49 @@ CLICK_RADIO_JS = r"""
 """
 
 
+LOG_DIR = ROOT / "logs" / "apply"
+_session = {"dir": None, "n": 0, "log": None}
+
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, text):
+        for st in self.streams:
+            st.write(text)
+            st.flush()
+        return len(text)
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
+def start_debug() -> Path:
+    d = LOG_DIR / datetime.now().strftime("%Y%m%d-%H%M%S")
+    d.mkdir(parents=True, exist_ok=True)
+    _session.update(dir=d, log=open(d / "run.log", "a", encoding="utf-8"))
+    sys.stdout = _Tee(sys.stdout, _session["log"])
+    return d
+
+
+def snap(page, tag: str) -> None:
+    """--debug: screenshot + HTML of the page (and its iframes) for this step."""
+    if not _session["dir"]:
+        return
+    _session["n"] += 1
+    base = _session["dir"] / f"{_session['n']:02d}-{re.sub(r'[^a-z0-9]+', '-', tag.lower()).strip('-')[:60]}"
+    try:
+        page.screenshot(path=f"{base}.png")
+        Path(f"{base}.html").write_text(page.content(), encoding="utf-8")
+        for i, fr in enumerate(page.frames[1:6], 1):
+            if fr.url and not fr.url.startswith("about:"):
+                Path(f"{base}.frame{i}.html").write_text(fr.content(), encoding="utf-8")
+    except Exception as e:
+        print(f"   (snapshot failed: {e})")
+
+
 def pause(a=0.8, b=2.2):
     time.sleep(random.uniform(a, b))
 
@@ -117,6 +165,8 @@ def pause(a=0.8, b=2.2):
 def ask(prompt: str, choices: str) -> str:
     while True:
         a = input(f"{prompt} ").strip().lower()
+        if _session["log"]:
+            _session["log"].write(f"   > {a}\n")      # your answer, into the debug log only
         if a and a[0] in choices:
             return a[0]
 
@@ -278,6 +328,7 @@ def company_apply(site: Page, con, cfg: dict, profile: dict, cache: dict, dry_ru
     log: list = []
     print(f"   company site: {site.url[:90]}")
     pause(2.5, 4)
+    snap(site, "company-site-landing")
     roots = form_roots(site)
     if not roots:   # the form is often behind the site's own "Apply" button
         btn = site.get_by_role("link", name=SITE_APPLY).or_(site.get_by_role("button", name=SITE_APPLY)).first
@@ -288,6 +339,7 @@ def company_apply(site: Page, con, cfg: dict, profile: dict, cache: dict, dry_ru
             pass
         roots = form_roots(site)
     if not roots:
+        snap(site, "company-no-form-found")
         a = ask("   Can't find the application form. Open it in the browser, then [c]ontinue / [s]kip / [q]uit:", "csq")
         if a != "c":
             return ("quit" if a == "q" else "skipped"), log
@@ -302,6 +354,7 @@ def company_apply(site: Page, con, cfg: dict, profile: dict, cache: dict, dry_ru
     if step != "ok":
         return ("quit" if step == "quit" else "skipped"), log
 
+    snap(site, "company-form-filled")
     print_log(log)
     if dry_run:
         print("   [dry-run] company form filled - nothing submitted")
@@ -342,6 +395,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
     page.goto(job["url"], wait_until="domcontentloaded")
     pause(2.5, 4.5)
     save_description(con, page, job)
+    snap(page, f"{job['job_id']}-job-page")
 
     btn = page.locator(APPLY_BTN).first
     if btn.count() == 0 or not btn.is_visible():
@@ -352,14 +406,24 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             print("   job closed - skipping")
             return "skipped", []
         print("   no Apply button found")
+        snap(page, "no-apply-button")
         return "failed", []
 
-    if "easy apply" not in (btn.inner_text() or "").lower():
+    text = (btn.inner_text() or "").lower()
+    if "easy apply" in text or "בקלות" in text:
+        easy = True
+    elif btn.locator("[data-test-icon*='external']").count():
+        easy = False
+    else:                                   # unknown button text (other UI language?) -> what the scan saw
+        easy = bool(job.get("easy_apply"))
+    print(f"   {'Easy Apply' if easy else 'company site'} (button: {text.strip()[:30]!r})")
+    if not easy:
         if cfg.get("easy_apply_only"):
             print("   company site - skipped (easy_apply_only: true)")
             return "external", []
         site = open_company_site(page)
         if site is None:
+            snap(page, "company-site-not-opened")
             a = ask("   Couldn't open the company site. Open its application page in the browser, "
                     "then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
@@ -378,14 +442,16 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
     try:
         page.locator(MODAL).first.wait_for(state="visible", timeout=10000)
     except PWTimeout:
+        snap(page, "easy-apply-modal-not-found")
         return "failed", []
     modal = page.locator(MODAL).first
     log: list = []
 
-    for _ in range(15):
+    for n in range(15):
         pause(1.2, 2.0)
         upload_resume_if_needed(modal, cfg["cv_path"])
         step = fill_step(modal, page, con, profile, cache, log)
+        snap(page, f"easy-apply-step-{n + 1}")
         if step != "ok":
             discard(page)
             return ("quit" if step == "quit" else "skipped"), log
@@ -410,6 +476,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             return "applied", log
 
         if not (click_first_visible(modal, REVIEW_BTN) or click_first_visible(modal, NEXT_BTN)):
+            snap(page, "stuck-no-next-button")
             a = ask("   Stuck (no Next/Review). Fix it in the browser, then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
                 discard(page)
@@ -418,6 +485,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
 
         pause(1.0, 1.8)
         if modal.locator(FIELD_ERROR).count():
+            snap(page, "invalid-fields")
             a = ask("   Some fields are invalid (red in the browser). Fix them, then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
                 discard(page)
@@ -425,6 +493,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             click_first_visible(modal, REVIEW_BTN) or click_first_visible(modal, NEXT_BTN)
 
     print("   too many steps - giving up")
+    snap(page, "too-many-steps")
     discard(page)
     return "failed", log
 
@@ -434,7 +503,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="fill forms but never submit")
     ap.add_argument("--job", help="apply to one job id (any status)")
     ap.add_argument("--login", action="store_true", help="only open the browser to log in")
+    ap.add_argument("--debug", action="store_true", help="log + screenshot + HTML of every step (logs/apply/)")
     args = ap.parse_args()
+    if args.debug:
+        print(f"debug log + screenshots: {start_debug()}")
 
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
     cfg["cv_path"] = os.getenv("CV_PATH", "")
@@ -473,6 +545,7 @@ def main():
                 result, log = apply_one(page, con, job, cfg, profile, cache, args.dry_run)
             except Exception as e:  # keep going on any page weirdness
                 print(f"   error: {e}")
+                snap(page, "error")
                 result, log = "failed", []
             if log:
                 db.save_answers(con, job["job_id"], log, dry_run=args.dry_run)
