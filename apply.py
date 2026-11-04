@@ -38,11 +38,21 @@ load_dotenv(ROOT / ".env")
 
 PROFILE_DIR = ROOT / "data" / "chrome-profile"
 
-APPLY_BTN = "button.jobs-apply-button, a.jobs-apply-button"     # Easy Apply and company-site Apply share it
+# LinkedIn's new job page (2026) has random class names (d7ilww...) - match the aria-label instead.
+# Last two = the old layout.
+APPLY_BTN = ("button[aria-label*='Easy Apply' i], a[aria-label*='Easy Apply' i], "
+             "a[aria-label*='company website' i], button[aria-label*='company website' i], "
+             "button.jobs-apply-button, a.jobs-apply-button")
+# The WHOLE element must read like "Applied 3 days ago": a loose /Applied .* ago/ matched
+# "Applied Materials ... 2 days ago" and "...or Applied AI" in a description.
+APPLIED_TEXT = re.compile(r"^Applied (\d+|an?) (second|minute|hour|day|week|month|year)s? ago$", re.I)
+CLOSED_TEXT = re.compile(r"No longer accepting applications", re.I)
 CONTINUE_BTN = "div[role=dialog] button:has-text('Continue'), div[role=dialog] a:has-text('Continue')"
 VISIBLE_FIELDS = "input:not([type=hidden]):not([type=file]):visible, select:visible, textarea:visible"
 SITE_APPLY = re.compile(r"^\s*(apply|apply now|apply for this (job|position|role)|הגש(ת)? מועמדות)\s*$", re.I)
-MODAL = "div.jobs-easy-apply-modal, div[data-test-modal][role='dialog'], div[role='dialog']:has(form)"
+# most specific first; the new layout may draw it inside its hidden "interop" iframe -> find_modal looks in all frames
+MODALS = ["div.jobs-easy-apply-modal", "[data-test-modal][role='dialog']",
+          "[role='dialog']:has(form)", "[role='dialog']:has-text('Apply to')"]
 SUBMIT_BTN = ("button[aria-label='Submit application'], button:has-text('Submit application'), "
               "button[data-live-test-easy-apply-submit-button]")
 REVIEW_BTN = ("button[aria-label='Review your application'], button:has-text('Review'), "
@@ -52,7 +62,9 @@ NEXT_BTN = ("button[aria-label='Continue to next step'], button:has-text('Next')
 DISMISS_BTN = "button[aria-label='Dismiss'], button.artdeco-modal__dismiss"
 DISCARD_BTN = "button[data-control-name='discard_application_confirm_btn'], button:has-text('Discard')"
 FIELD_ERROR = ".artdeco-inline-feedback--error"
-JOB_DESCRIPTION = "#job-details, div.jobs-description__content, div.jobs-description-content__text"
+# old layout ids/classes; new layout: first text box on the page is "About the job" (second = "About the company")
+JOB_DESCRIPTION = ("#job-details, div.jobs-description__content, div.jobs-description-content__text, "
+                   "[data-testid='expandable-text-box']")
 
 # Fields of the current Easy Apply step. all=false -> only empty ones (tagged with data-as-id).
 # all=true -> every field with its current value (to read back what you typed).
@@ -211,6 +223,45 @@ def ensure_logged_in(page: Page) -> None:
         page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
 
 
+def find_apply(page: Page, easy_default: bool, wait: float = 8) -> tuple:
+    """-> (button, 'easy' | 'site'), or (None, 'applied' | 'closed' | 'none'). Waits a bit for slow pages."""
+    deadline = time.time() + wait
+    while True:
+        btn = visible_button(page, APPLY_BTN)
+        if btn is not None:
+            label = f"{btn.get_attribute('aria-label') or ''} {btn.inner_text() or ''}".lower()
+            if "easy apply" in label or "בקלות" in label:
+                return btn, "easy"
+            if "company website" in label or btn.locator("[data-test-icon*='external']").count():
+                return btn, "site"
+            return btn, ("easy" if easy_default else "site")      # unknown wording -> what the scan saw
+        if page.get_by_text(APPLIED_TEXT).count():                  # only when there's no button
+            return None, "applied"
+        if page.get_by_text(CLOSED_TEXT).count():
+            return None, "closed"
+        if time.time() >= deadline:
+            return None, "none"
+        time.sleep(0.5)
+
+
+def find_modal(page: Page, timeout: float = 12) -> tuple:
+    """-> (modal, frame) of the Easy Apply form, or (None, None). Looks in the page and in every iframe."""
+    deadline = time.time() + timeout
+    while True:
+        for sel in MODALS:
+            for fr in page.frames:
+                try:
+                    m = fr.locator(sel)
+                    for i in range(m.count()):
+                        if m.nth(i).is_visible():
+                            return m.nth(i), fr
+                except Exception:   # frames come and go
+                    continue
+        if time.time() >= deadline:
+            return None, None
+        time.sleep(0.5)
+
+
 def save_description(con, page: Page, job: dict) -> None:
     """Snapshot the description from the logged-in job page (postings get removed later)."""
     try:
@@ -305,17 +356,16 @@ def ask_new(pairs: list, con, cache: dict, log: list, prompt: str) -> str:
     return "ok"
 
 
-def fill_step(modal, page: Page, con, profile: dict, cache: dict, log: list) -> str:
-    """One Easy Apply step: fill known answers, stop on new required questions."""
-    new = fill_known(modal, page, profile, cache, log)
+def fill_step(modal, frame, con, profile: dict, cache: dict, log: list) -> str:
+    """One Easy Apply step: fill known answers, stop on new required questions. frame = the modal's page/iframe."""
+    new = fill_known(modal, frame, profile, cache, log)
     return ask_new([(modal, f) for f in new], con, cache, log, "   Done? [c]ontinue / [s]kip job / [q]uit:")
 
 
 # ---------------------------------------------------------------- company sites
 
-def open_company_site(page: Page) -> Page | None:
+def open_company_site(page: Page, btn) -> Page | None:
     """Click LinkedIn's (non Easy Apply) Apply button; return the company's page (new tab or same tab)."""
-    btn = page.locator(APPLY_BTN).first
     try:
         with page.context.expect_page(timeout=8000) as info:
             btn.click()
@@ -330,7 +380,8 @@ def open_company_site(page: Page) -> Page | None:
                 site = info.value
             except PWTimeout:
                 pass
-    try:
+    try:   # the link goes through linkedin.com/safety/go/?url=... first, then redirects to the company
+        site.wait_for_url(lambda u: "linkedin.com" not in u, timeout=15000)
         site.wait_for_load_state("domcontentloaded", timeout=20000)
     except PWTimeout:
         pass
@@ -408,14 +459,15 @@ def click_first_visible(modal, selector: str) -> bool:
     return False
 
 
-def discard(page: Page) -> None:
+def discard(frame) -> None:
+    """frame = the page or iframe the Easy Apply form is in."""
     if not confirm("Close the form and discard this unfinished application"):
         print("   left the form open")
         return
     try:
-        page.locator(DISMISS_BTN).first.click(timeout=3000)
+        frame.locator(DISMISS_BTN).first.click(timeout=3000)
         pause(0.8, 1.5)
-        page.locator(DISCARD_BTN).first.click(timeout=3000)
+        frame.locator(DISCARD_BTN).first.click(timeout=3000)
     except PWTimeout:
         pass
 
@@ -436,33 +488,29 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
     save_description(con, page, job)
     snap(page, f"{job['job_id']}-job-page")
 
-    btn = page.locator(APPLY_BTN).first
-    if btn.count() == 0 or not btn.is_visible():
-        if page.locator("text=/Applied .* ago/").count():
-            print("   already applied")
+    btn, kind = find_apply(page, easy_default=bool(job.get("easy_apply")))
+    if btn is None:
+        if kind == "applied":
+            print("   already applied (LinkedIn shows 'Applied ... ago')")
             return "applied", []
-        if page.locator("text=/No longer accepting applications/i").count():
-            print("   job closed - skipping")
+        if kind == "closed":
+            print("   job closed (no longer accepting applications) - skipping")
             return "skipped", []
-        print("   no Apply button found")
+        # don't mark it failed: a LinkedIn page change would otherwise "fail" the whole queue in one run
+        print("   no Apply button found - left in the queue (see the screenshot)")
         snap(page, "no-apply-button")
-        return "failed", []
+        return "queued", []
 
-    text = (btn.inner_text() or "").lower()
-    if "easy apply" in text or "בקלות" in text:
-        easy = True
-    elif btn.locator("[data-test-icon*='external']").count():
-        easy = False
-    else:                                   # unknown button text (other UI language?) -> what the scan saw
-        easy = bool(job.get("easy_apply"))
-    print(f"   {'Easy Apply' if easy else 'company site'} (button: {text.strip()[:30]!r})")
+    easy = kind == "easy"
+    label = (btn.get_attribute("aria-label") or btn.inner_text() or "").strip()
+    print(f"   {'Easy Apply' if easy else 'company site'} (button: {label[:40]!r})")
     if not easy:
         if cfg.get("easy_apply_only"):
             print("   company site - skipped (easy_apply_only: true)")
             return "external", []
         if not confirm("Click 'Apply' (opens the company site)"):
             return "queued", []
-        site = open_company_site(page)
+        site = open_company_site(page, btn)
         if site is None:
             snap(page, "company-site-not-opened")
             a = ask("   Couldn't open the company site. Open its application page in the browser, "
@@ -481,37 +529,40 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
     if not confirm("Click 'Easy Apply'"):
         return "queued", []
     btn.click()
-    try:
-        page.locator(MODAL).first.wait_for(state="visible", timeout=10000)
-    except PWTimeout:
+    modal, frame = find_modal(page)       # frame: the page itself, or the iframe the form is drawn in
+    while modal is None:
         snap(page, "easy-apply-modal-not-found")
-        return "failed", []
-    modal = page.locator(MODAL).first
+        a = ask("   Can't find the Easy Apply form. [r]etry / [l]eave it in the queue / [q]uit:", "rlq")
+        if a != "r":
+            return ("quit" if a == "q" else "queued"), []
+        modal, frame = find_modal(page, timeout=5)
+    if frame is not page.main_frame:
+        print("   (the form is inside an iframe)")
     log: list = []
 
     for n in range(15):
         pause(1.2, 2.0)
         upload_resume_if_needed(modal, cfg["cv_path"])
-        step = fill_step(modal, page, con, profile, cache, log)
+        step = fill_step(modal, frame, con, profile, cache, log)
         snap(page, f"easy-apply-step-{n + 1}")
         if step != "ok":
-            discard(page)
+            discard(frame)
             return ("quit" if step == "quit" else "skipped"), log
 
         if modal.locator(SUBMIT_BTN).count() and modal.locator(SUBMIT_BTN).first.is_visible():
             print_log(log)
             if dry_run:
                 print("   [dry-run] reached Submit - discarding")
-                discard(page)
+                discard(frame)
                 return "skipped", log
             a = ask("   Submit? (check the form in the browser) [y]es / [s]kip / [q]uit:", "ysq")
             if a != "y":
-                discard(page)
+                discard(frame)
                 return ("quit" if a == "q" else "skipped"), log
             click_first_visible(modal, SUBMIT_BTN)
             pause(2.5, 4)
             try:  # close the "application sent" dialog
-                page.locator(DISMISS_BTN).first.click(timeout=4000)
+                frame.locator(DISMISS_BTN).first.click(timeout=4000)
             except PWTimeout:
                 pass
             print("   ✔ submitted")
@@ -522,13 +573,13 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             snap(page, "stuck-no-next-button")
             a = ask("   Stuck (no Next/Review). Fix it in the browser, then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
-                discard(page)
+                discard(frame)
                 return ("quit" if a == "q" else "skipped"), log
             continue
         if not confirm(f"Click '{(nxt.inner_text() or 'Next').strip()[:30]}'"):
             a = ask("   OK - do it yourself in the browser, then [c]ontinue / [s]kip job / [q]uit:", "csq")
             if a != "c":
-                discard(page)
+                discard(frame)
                 return ("quit" if a == "q" else "skipped"), log
             continue
         nxt.click()
@@ -538,7 +589,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             snap(page, "invalid-fields")
             a = ask("   Some fields are invalid (red in the browser). Fix them, then [c]ontinue / [s]kip / [q]uit:", "csq")
             if a != "c":
-                discard(page)
+                discard(frame)
                 return ("quit" if a == "q" else "skipped"), log
             nxt = visible_button(modal, REVIEW_BTN) or visible_button(modal, NEXT_BTN)
             if nxt is not None and confirm(f"Click '{(nxt.inner_text() or 'Next').strip()[:30]}'"):
@@ -546,7 +597,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
 
     print("   too many steps - giving up")
     snap(page, "too-many-steps")
-    discard(page)
+    discard(frame)
     return "failed", log
 
 
