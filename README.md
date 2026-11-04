@@ -10,7 +10,9 @@ puts it on a local job board, and applies (semi-auto) to the good matches via Ea
 - Drops jobs asking for > 4 years (minimum of the range), management titles, and Data Science jobs where an
   MSc/PhD is required. Senior titles are kept (`exclude_senior_titles: false`) - the years filter decides
 - Hides jobs in excluded locations (`location_exclude`: Jerusalem)
-- Never processes the same job twice
+- Never saves or scores the same job twice: the LinkedIn id is the Mongo `_id`, reposts (same title + company)
+  are kept out as "duplicate", and a run must atomically claim a job before scoring it, so even two runs at
+  the same time can't score it twice. Proof: `.venv/bin/python tests/check_no_duplicates.py`
 
 ## How it runs
 
@@ -61,7 +63,7 @@ docker compose ps                                  # what's running
 docker compose restart                             # after editing code
 docker compose up -d --build                       # after changing requirements.txt
 .venv/bin/python scan.py                           # scan + score now (on the Mac, talks to Mongo on localhost)
-.venv/bin/python score.py --rescore
+.venv/bin/python score.py --rescore              # the only way to score jobs again - asks first
 .venv/bin/python recheck.py [--dropped]            # re-run filters after editing config.yaml
 .venv/bin/python send.py --preview                 # digest -> data/preview.html
 docker compose --profile schedule up -d            # turn the daily 17:00 scan on

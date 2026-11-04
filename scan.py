@@ -48,7 +48,7 @@ def main():
                     db.insert(con, job, False, "location")
                     dropped += 1
                     continue
-                if (job["title"].lower(), job["company"].lower()) in seen_tc:
+                if db.title_company_key(job["title"], job["company"]) in seen_tc:
                     db.insert(con, job, False, "duplicate")
                     continue
 
@@ -57,7 +57,7 @@ def main():
                 db.insert(con, job, keep, reason)
                 if keep:
                     kept += 1
-                    seen_tc.add((job["title"].lower(), job["company"].lower()))
+                    seen_tc.add(db.title_company_key(job["title"], job["company"]))
                     log.info("  + %s @ %s (yrs=%s)", job["title"], job["company"], job.get("years"))
                 else:
                     dropped += 1

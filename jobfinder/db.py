@@ -10,7 +10,7 @@ Job statuses: new -> queued (score >= apply) / review / low -> applied / skipped
               board stages set by you: assignment / interview1 / interview2 / offer / rejected
 """
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 
 from pymongo import ASCENDING, DESCENDING, MongoClient
@@ -18,6 +18,7 @@ from pymongo.database import Database
 from pymongo.errors import ServerSelectionTimeoutError
 
 WAITING = ["new", "queued", "review", "low"]      # statuses a re-score / re-check may change
+CLAIM_TTL = timedelta(minutes=10)                  # a scoring claim older than this counts as abandoned
 
 
 def now() -> datetime:
@@ -55,8 +56,13 @@ def known_ids(d: Database) -> set[str]:
     return set(d.jobs.distinct("_id"))
 
 
+def title_company_key(title: str, company: str) -> tuple[str, str]:
+    """Same job reposted under a new LinkedIn id -> same key (case and spacing ignored)."""
+    return " ".join((title or "").lower().split()), " ".join((company or "").lower().split())
+
+
 def known_title_company(d: Database) -> set[tuple[str, str]]:
-    return {(j["title"].lower(), j["company"].lower())
+    return {title_company_key(j["title"], j["company"])
             for j in d.jobs.find({"keep": True}, {"title": 1, "company": 1})}
 
 
@@ -97,11 +103,25 @@ def mark_sent(d: Database, ids: list[str]) -> None:
     d.jobs.update_many({"_id": {"$in": ids}}, {"$set": {"sent_at": now()}})
 
 
+def claim_for_scoring(d: Database, job_id: str) -> bool:
+    """Atomically take an unscored job for scoring. False if it's already scored, or another run is
+    scoring it right now - so a job is never scored twice, even by two runs at the same time."""
+    r = d.jobs.update_one(
+        {"_id": job_id, "keep": True, "score": None,
+         "$or": [{"scoring_at": None}, {"scoring_at": {"$lt": now() - CLAIM_TTL}}]},
+        {"$set": {"scoring_at": now()}})
+    return r.modified_count == 1
+
+
+def release_claim(d: Database, job_id: str) -> None:
+    d.jobs.update_one({"_id": job_id}, {"$unset": {"scoring_at": ""}})
+
+
 def set_score(d: Database, job_id: str, score: int, reason: str, status: str, description: str | None = None) -> None:
     fields = {"score": score, "match_reason": reason, "status": status}
     if description:
         fields["description"] = description
-    update_job(d, job_id, fields)
+    d.jobs.update_one({"_id": job_id}, {"$set": fields, "$unset": {"scoring_at": ""}})
 
 
 def reset_scores_waiting(d: Database) -> int:
