@@ -67,6 +67,7 @@ def fake_score(job, model=None):
 
 linkedin.search, linkedin.details, linkedin._pause = fake_search, fake_details, lambda *a: None
 claude.score_job = fake_score
+scan.auto_clean = lambda cfg: None     # never clean your real logs/ from a test
 failures = []
 
 

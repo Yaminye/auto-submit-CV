@@ -8,6 +8,7 @@ import yaml
 from dotenv import load_dotenv
 
 from jobfinder import db, filters, linkedin
+from jobfinder.cleanup import auto_clean
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT / ".env")
@@ -20,6 +21,7 @@ log = logging.getLogger("scan")
 
 def main():
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
+    auto_clean(cfg)                    # logs/ from earlier days (keep_logs_days)
     con = db.connect()
     started = db.now()
     db.set_meta(con, "last_scan", {"started_at": started, "finished_at": None, "running": True})

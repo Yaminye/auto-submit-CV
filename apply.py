@@ -31,6 +31,7 @@ from dotenv import load_dotenv
 from playwright.sync_api import Page, TimeoutError as PWTimeout, sync_playwright
 
 from jobfinder import db
+from jobfinder.cleanup import auto_clean
 from jobfinder.known_answers import lookup, norm
 
 ROOT = Path(__file__).resolve().parent
@@ -792,6 +793,7 @@ def main():
         print(f"debug log + screenshots: {start_debug()}")
 
     cfg = yaml.safe_load((ROOT / "config.yaml").read_text())
+    auto_clean(cfg)                    # logs/ from earlier days (keep_logs_days)
     cfg["cv_path"] = os.getenv("CV_PATH", "")
     if not Path(cfg["cv_path"]).exists():
         sys.exit("CV_PATH missing or not found - set it in .env")
