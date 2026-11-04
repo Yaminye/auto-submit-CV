@@ -25,12 +25,13 @@ import sys
 import time
 from datetime import date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 from dotenv import load_dotenv
 from playwright.sync_api import Page, TimeoutError as PWTimeout, sync_playwright
 
-from jobfinder import db
+from jobfinder import agent, db
 from jobfinder.cleanup import auto_clean
 from jobfinder.known_answers import lookup, norm
 
@@ -54,6 +55,9 @@ CLOSED_TEXT = re.compile(r"No longer accepting applications", re.I)
 CONTINUE_BTN = "div[role=dialog] button:has-text('Continue'), div[role=dialog] a:has-text('Continue')"
 VISIBLE_FIELDS = "input:not([type=hidden]):not([type=file]):visible, select:visible, textarea:visible"
 SITE_APPLY = re.compile(r"^\s*(apply|apply now|apply for this (job|position|role)|הגש(ת)? מועמדות)\s*$", re.I)
+# the company form's own final button (when the form has no type=submit button)
+SITE_SUBMIT = re.compile(r"^\s*(submit|send|apply|apply now|(submit|send)( my| your)? application|הגש|הגשה|שלח|שליחה|"
+                         r"הגש(ת)? מועמדות)\s*[!.]?\s*$", re.I)
 # most specific first. New layout: a native <dialog open> ("Apply to Omnisys"), no role attribute, no <form>.
 # find_modal also looks inside iframes.
 MODALS = ["div.jobs-easy-apply-modal", "dialog[open]:has-text('Apply to')", "[data-test-modal][role='dialog']",
@@ -266,6 +270,7 @@ def ask(prompt: str, choices: str) -> str:
             _session["log"].write(f"   > {a}\n")      # your answer, into the debug log only
         if a and a[0] in choices:
             return a[0]
+        print(f"   (type one of: {' / '.join(choices)})")
 
 
 # ---------------------------------------------------------------- browser steps
@@ -571,8 +576,61 @@ def form_roots(site: Page) -> list:
     return roots
 
 
-def company_apply(site: Page, con, cfg: dict, profile: dict, cache: dict, dry_run: bool) -> tuple[str, list]:
+def confirm_send(action: str) -> bool:
+    """ALWAYS asks (also without --step): before a click that sends an application. q = stop the run."""
+    a = ask(f"   ? {action}  [y/n/q]", "ynq")
+    if a == "q":
+        raise Quit()
+    return a == "y"
+
+
+def agent_ui() -> SimpleNamespace:
+    """What the agent (jobfinder/agent.py) may use from here: your y/n prompts and the form finder."""
+    return SimpleNamespace(confirm=confirm, confirm_send=confirm_send, ask=ask, form_roots=form_roots, step=STEP["on"])
+
+
+def _first_visible(loc):
+    for i in range(min(loc.count(), 10)):
+        b = loc.nth(i)
+        if b.is_visible() and b.is_enabled():
+            return b
+    return None
+
+
+def site_submit(site: Page, roots: list) -> bool:
+    """Deterministic: click the form's own Submit / Send button (after your y), True once the site confirms."""
+    btn = None
+    for root, _ in roots:
+        btn = (_first_visible(root.locator("button[type=submit], input[type=submit]"))
+               or _first_visible(root.get_by_role("button", name=SITE_SUBMIT)))
+        if btn is not None:
+            break
+    if btn is None:
+        print("   no Submit button found in the form")
+        return False
+    label = re.sub(r"\s+", " ", btn.inner_text() or btn.get_attribute("value") or "Submit").strip()[:30]
+    if agent.captcha(site) == "checkbox":
+        if ask("   The form has an \"I'm not a robot\" box - tick it in the browser (the script never does), "
+               "then [c]ontinue / [s]kip:", "cs") != "c":
+            return False
+    if not confirm_send(f"Click '{label}' - this SENDS your application to the company"):
+        return False
+    before, url = agent.site_sent_marks(site), site.url
+    btn.click()
+    if agent.wait_site_sent(site, before, url, ask):
+        print("   ✔ sent - the site confirmed it")
+        return True
+    snap(site, "company-submit-not-confirmed")
+    print("   clicked, but the site shows no confirmation")
+    return False
+
+
+def company_apply(site: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
+                  dry_run: bool) -> tuple[str, list]:
+    """Deterministic first (known answers, CV, the form's own Submit button); when that's stuck, the agent
+    (agent_tries tries, jobfinder/agent.py); then you."""
     log: list = []
+    use_agent = agent.available(cfg)
     print(f"   company site: {site.url[:90]}")
     pause(2.5, 4)
     snap(site, "company-site-landing")
@@ -588,25 +646,45 @@ def company_apply(site: Page, con, cfg: dict, profile: dict, cache: dict, dry_ru
         roots = form_roots(site)
     if not roots:
         snap(site, "company-no-form-found")
-        a = ask("   Can't find the application form. Open it in the browser, then [c]ontinue / [s]kip / [q]uit:", "csq")
-        if a != "c":
-            return ("quit" if a == "q" else "skipped"), log
-        roots = form_roots(site)
+        if not use_agent:
+            a = ask("   Can't find the application form. Open it in the browser, then [c]ontinue / [s]kip / [q]uit:",
+                    "csq")
+            if a != "c":
+                return ("quit" if a == "q" else "skipped"), log
+            roots = form_roots(site)
 
     pairs = []
     for root, frame in roots:
         upload_resume_if_needed(root, cfg["cv_path"])
         pairs += [(root, f) for f in fill_known(root, frame, profile, cache, log)]
-    step = ask_new(pairs, con, cache, log,
-                   "   Fill them in the browser (don't submit yet), then [c]ontinue / [s]kip / [q]uit:")
-    if step != "ok":
-        return ("quit" if step == "quit" else "skipped"), log
+    missing = [f for _, f in pairs if f["required"]]
+    if missing and not use_agent:          # no agent -> you answer the new questions (saved for next time)
+        step = ask_new(pairs, con, cache, log,
+                       "   Fill them in the browser (don't submit yet), then [c]ontinue / [s]kip / [q]uit:")
+        if step != "ok":
+            return ("quit" if step == "quit" else "skipped"), log
+        missing = []
+    else:
+        log += [{"label": f["label"], "value": "", "source": "left empty (optional)"}
+                for _, f in pairs if not f["required"]]
 
     snap(site, "company-form-filled")
     print_log(log)
+    sent = False
+    if roots and not missing and not dry_run:
+        sent = site_submit(site, roots)                      # deterministic: the form's own Submit button
+    if not sent and use_agent and (missing or not dry_run):
+        if missing:
+            print(f"   {len(missing)} required question(s) the script has no answer for -> the agent")
+        else:
+            print("   not sent yet -> the agent")
+        sent = agent.run(site, job, cfg, profile, cache, con, log, agent_ui(), dry_run) == "submitted"
     if dry_run:
         print("   [dry-run] company form filled - nothing submitted")
         return "skipped", log
+    if sent:
+        snap(site, "company-sent")
+        return "applied", log
     a = ask("   Check the form in the browser, solve any CAPTCHA and click the site's Submit yourself.\n"
             "   Then: [d]one, I applied / [l]ater (keep in queue) / [s]kip / [q]uit:", "dlsq")
     return {"d": "applied", "l": "queued", "s": "skipped", "q": "quit"}[a], log
@@ -686,7 +764,7 @@ def apply_one(page: Page, con, job: dict, cfg: dict, profile: dict, cache: dict,
             site = next((pg for pg in reversed(page.context.pages) if "linkedin.com" not in pg.url), None)
             if site is None:
                 return "failed", []
-        result = company_apply(site, con, cfg, profile, cache, dry_run)   # q (Quit) leaves the tab open
+        result = company_apply(site, con, job, cfg, profile, cache, dry_run)   # q (Quit) leaves the tab open
         if site is not page and confirm("Close the company site tab"):
             pause(1.5, 2.5)
             site.close()

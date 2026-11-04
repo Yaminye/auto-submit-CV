@@ -17,6 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 os.environ["MONGO_DB"] = TEST_DB = f"autosubmit_test_{uuid.uuid4().hex[:8]}"
+os.environ["ANTHROPIC_API_KEY"] = ""      # never the real key from .env: no agent, no API calls in this test
 
 from playwright.sync_api import sync_playwright  # noqa: E402
 
@@ -30,7 +31,7 @@ PROFILE = {"first_name": "Test", "last_name": "User", "email": "test@example.com
            "linkedin_url": "https://www.linkedin.com/in/test", "skill_years": {"Python": 3}}
 CV = Path(tempfile.mkdtemp()) / "mock-cv.pdf"
 CV.write_bytes(b"%PDF-1.4 mock")
-CFG = {"cv_path": str(CV), "easy_apply_only": False}
+CFG = {"cv_path": str(CV), "easy_apply_only": False, "agent_tries": 0}   # the agent: tests/check_agent.py
 
 
 def modal(extra=""):
@@ -249,7 +250,7 @@ try:
             next(f for f in site.frames if f is not site.main_frame).select_option("#hear", label="LinkedIn")
             return "c"
 
-        script = Script(("Fill them in the browser", you_pick_linkedin), ("[d]one", "d"))
+        script = Script(("Fill them in the browser", you_pick_linkedin), ("this SENDS", "n"), ("[d]one", "d"))
         page, _, (result, _), answers = run("C1", script)
         check("result = applied (after your 'd')", result == "applied", result)
         check("company site opened (redirect followed)",

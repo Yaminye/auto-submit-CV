@@ -22,6 +22,10 @@ apply_threshold: 70         # >= this -> apply queue
 review_threshold: 50        # 50-69 -> saved for review, not applied
 max_applications_per_day: 20
 follow_companies: false     # false = untick LinkedIn's "Follow <company>" box before every Submit
+agent_tries: 4              # company sites: when the script is stuck (a required question it has no answer for, no
+                            # Submit button, no confirmation) Claude gets this many tries to fill what's left and
+                            # click Submit - you approve the click that sends. Notes: company/<name>/notes.md. 0 = off
+agent_model: claude-opus-5-5   # claude-sonnet-5-5 = about half the price
 keep_logs_days: 1           # auto clean at every apply/scan run: delete logs/ from earlier days (1 = keep today's, 0 = off)
 
 # category -> search keywords

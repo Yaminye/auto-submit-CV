@@ -6,3 +6,5 @@ __pycache__/
 profile.yaml
 # MongoDB extension scratch playgrounds (queries.mongodb.js is the real one)
 playground-*.mongodb.js
+# agent notes per company (apply.py) - local data, may hold your answers
+company/
