@@ -73,10 +73,17 @@ def title_ok(title: str, excludes: list[str], includes: list[str] | None = None)
     return not includes or any(x.lower() in t for x in includes)
 
 
+def location_ok(location: str, cfg: dict) -> bool:
+    loc = (location or "").lower()
+    return not any(x.lower() in loc for x in cfg.get("location_exclude") or [])
+
+
 def evaluate(job: dict, cfg: dict) -> tuple[bool, str]:
     """Return (keep, reason)."""
     if not title_ok(job["title"], title_excludes(cfg), cfg.get("title_include")):
         return False, "title"
+    if not location_ok(job.get("location", ""), cfg):
+        return False, "location"
     if any(c.lower() in job["company"].lower() for c in cfg.get("company_blacklist") or []):
         return False, "blacklist"
     if cfg.get("easy_apply_only") and job.get("easy_apply") is False:

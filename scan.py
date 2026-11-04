@@ -44,6 +44,10 @@ def main():
                     db.insert(con, job, False, "title")
                     dropped += 1
                     continue
+                if not filters.location_ok(job.get("location", ""), cfg):
+                    db.insert(con, job, False, "location")
+                    dropped += 1
+                    continue
                 if (job["title"].lower(), job["company"].lower()) in seen_tc:
                     db.insert(con, job, False, "duplicate")
                     continue

@@ -5,6 +5,9 @@ schedule:
 
 location: Israel
 geo_id: "101620260"        # LinkedIn geoId for Israel
+location_exclude:          # drop jobs whose LinkedIn location contains one of these
+  - Jerusalem              # also matches "Jerusalem District" (Beit Shemesh, Mevaseret Zion...)
+  - ירושלים
 posted_within_hours: 48     # only jobs from the last 1-2 days
 max_years_required: 4       # drop jobs whose MINIMUM is above this: 4+ / 3-6 ok, 5+ dropped
 pages_per_query: 8          # result pages per search keyword; LinkedIn gives 10 jobs/page -> up to 80

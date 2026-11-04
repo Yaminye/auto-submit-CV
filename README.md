@@ -9,6 +9,7 @@ puts it on a local job board, and applies (semi-auto) to the good matches via Ea
   then asks LinkedIn for Easy Apply jobs and every job page is checked too
 - Drops jobs asking for > 4 years (minimum of the range), management titles, and Data Science jobs where an
   MSc/PhD is required. Senior titles are kept (`exclude_senior_titles: false`) - the years filter decides
+- Hides jobs in excluded locations (`location_exclude`: Jerusalem)
 - Never processes the same job twice
 
 ## How it runs

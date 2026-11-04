@@ -1,8 +1,8 @@
 """Re-run the filters after changing config.yaml / filters.py.
 
   .venv/bin/python recheck.py            # re-check kept jobs that are still waiting (new/queued/review/low)
-  .venv/bin/python recheck.py --dropped  # re-check jobs dropped by a config rule: the title filter or
-                                         # easy_apply_only (e.g. after turning one of them off)
+  .venv/bin/python recheck.py --dropped  # re-check jobs dropped by a config rule: title words,
+                                         # easy_apply_only or location_exclude (after changing one)
 
 Jobs you moved forward (applied / interview / offer / ...) are never touched.
 New keeps get scored by Claude at the end (if ANTHROPIC_API_KEY is set).
@@ -51,7 +51,7 @@ def recheck_kept(con, cfg) -> None:
 
 
 def recheck_dropped(con, cfg) -> None:
-    rows = db.find_jobs(con, {"keep": False, "reason": {"$in": ["title", "not Easy Apply"]}})
+    rows = db.find_jobs(con, {"keep": False, "reason": {"$in": ["title", "not Easy Apply", "location"]}})
     candidates = [j for j in rows
                   if filters.title_ok(j["title"], filters.title_excludes(cfg), cfg.get("title_include"))]
     print(f"{len(rows)} jobs dropped by a config rule, {len(candidates)} pass the title filter now")
