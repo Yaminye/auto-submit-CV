@@ -1,5 +1,6 @@
 """LinkedIn public (guest) job search - no login, no account risk."""
 import random
+import re
 import time
 from urllib.parse import quote
 
@@ -8,7 +9,7 @@ from bs4 import BeautifulSoup
 
 SEARCH_URL = (
     "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-    "?keywords={kw}&location={loc}&geoId={geo}&f_TPR=r{secs}&sortBy=DD&start={start}"
+    "?keywords={kw}&location={loc}&geoId={geo}&f_TPR=r{secs}&sortBy=DD&start={start}{extra}"
 )
 DETAIL_URL = "https://www.linkedin.com/jobs-guest/jobs/api/jobPosting/{job_id}"
 HEADERS = {
@@ -46,12 +47,13 @@ def _text(el) -> str:
     return el.get_text(" ", strip=True) if el else ""
 
 
-def search(keyword: str, location: str, geo_id: str, hours: int, pages: int) -> list[dict]:
+def search(keyword: str, location: str, geo_id: str, hours: int, pages: int,
+           easy_apply_only: bool = False) -> list[dict]:
     jobs = []
     for page in range(pages):
         html = _get(SEARCH_URL.format(
             kw=quote(keyword), loc=quote(location), geo=geo_id,
-            secs=hours * 3600, start=page * 10,
+            secs=hours * 3600, start=page * 10, extra="&f_AL=true" if easy_apply_only else "",
         ))
         if not html:
             break
@@ -80,6 +82,15 @@ def search(keyword: str, location: str, geo_id: str, hours: int, pages: int) -> 
     return jobs
 
 
+def easy_apply(html: str) -> bool | None:
+    """True = LinkedIn Easy Apply, False = apply on the company site, None = can't tell."""
+    if "apply-link-offsite" in html or "offsite-apply-icon" in html:
+        return False
+    if re.search(r"apply-link-(?:simple_)?onsite", html):   # both variants = Easy Apply on LinkedIn
+        return True
+    return None
+
+
 def details(job_id: str) -> dict:
     html = _get(DETAIL_URL.format(job_id=job_id))
     if not html:
@@ -94,4 +105,5 @@ def details(job_id: str) -> dict:
         "description": desc.get_text("\n", strip=True) if desc else "",
         "seniority": criteria.get("seniority level", ""),
         "applicants": _text(soup.select_one(".num-applicants__caption")),
+        "easy_apply": easy_apply(html),
     }

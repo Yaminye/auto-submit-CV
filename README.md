@@ -5,6 +5,8 @@ puts it on a local job board, and applies (semi-auto) to the good matches via Ea
 
 - Uses LinkedIn's public (guest) job search for finding jobs, so no login and no account risk
 - Only jobs posted in the last 48h; categories Backend, Full Stack, AI Engineer, Data Science, DevOps
+- Only LinkedIn **Easy Apply** jobs (`easy_apply_only: true`): the search asks LinkedIn for Easy Apply jobs only,
+  and every job page is checked too. Set it to `false` to also see jobs that apply on the company site
 - Drops jobs asking for > 4 years (minimum of the range), management titles, and Data Science jobs where an
   MSc/PhD is required. Senior titles are kept (`exclude_senior_titles: false`) - the years filter decides
 - Never processes the same job twice

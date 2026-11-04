@@ -30,7 +30,8 @@ def main():
     for category, keywords in cfg["queries"].items():
         for kw in keywords:
             results = linkedin.search(kw, cfg["location"], cfg["geo_id"],
-                                      cfg["posted_within_hours"], cfg["pages_per_query"])
+                                      cfg["posted_within_hours"], cfg["pages_per_query"],
+                                      easy_apply_only=bool(cfg.get("easy_apply_only")))
             log.info("%-25s %3d results", kw, len(results))
             for job in results:
                 if job["job_id"] in seen:

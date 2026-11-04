@@ -82,7 +82,7 @@ def applied_today(d: Database) -> int:
 # ---------------------------------------------------------------- jobs: write
 
 def insert(d: Database, job: dict, keep: bool, reason: str) -> None:
-    doc = {k: job.get(k) for k in ("category", "title", "company", "location", "posted", "url", "years", "applicants")}
+    doc = {k: job.get(k) for k in ("category", "title", "company", "location", "posted", "url", "years", "applicants", "easy_apply")}
     doc.update(_id=job["job_id"], job_id=job["job_id"], keep=keep, reason=reason, found_at=now(),
                description=job.get("description") if keep else None,
                status="new", score=None, sent_at=None)

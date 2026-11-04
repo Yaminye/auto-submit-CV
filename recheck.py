@@ -25,6 +25,8 @@ for _n in ("httpx", "httpx2"):
 
 def update(con, job: dict, keep: bool, reason: str) -> None:
     fields = {"keep": keep, "reason": reason, "years": job.get("years")}
+    if job.get("easy_apply") is not None:
+        fields["easy_apply"] = job["easy_apply"]
     if keep and job.get("description"):
         fields["description"] = job["description"]
     db.update_job(con, job["job_id"], fields)
@@ -37,7 +39,7 @@ def recheck_kept(con, cfg) -> None:
         if not filters.title_ok(job["title"], filters.title_excludes(cfg), cfg.get("title_include")):
             keep, reason = False, "title"
         else:
-            if not job.get("description"):
+            if not job.get("description") or "easy_apply" not in job:
                 job.update(linkedin.details(job["job_id"]))
                 linkedin._pause(1.0, 2.0)
             keep, reason = filters.evaluate(job, cfg)

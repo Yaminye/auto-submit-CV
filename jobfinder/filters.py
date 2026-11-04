@@ -79,6 +79,8 @@ def evaluate(job: dict, cfg: dict) -> tuple[bool, str]:
         return False, "title"
     if any(c.lower() in job["company"].lower() for c in cfg.get("company_blacklist") or []):
         return False, "blacklist"
+    if cfg.get("easy_apply_only") and job.get("easy_apply") is False:
+        return False, "not Easy Apply"
     if (job.get("seniority") or "").lower() in {"director", "executive"}:
         return False, "seniority"
     desc = job.get("description", "")
